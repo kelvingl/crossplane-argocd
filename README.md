@@ -81,8 +81,8 @@ kubectl --context k3d-spoke-02 -n dp-demo-02 get deploy,svc
 kubectl --context k3d-hub -n argocd port-forward svc/argocd-server 8081:443
 # usuário: admin / senha: scripts/06-install-argocd.sh imprime a senha inicial
 
-# Gogs -> http://localhost:3000
-kubectl --context k3d-hub -n gogs port-forward svc/gogs 3000:3000
+# Gogs -> http://localhost:30300 (3000 local costuma já estar em uso por outra coisa)
+kubectl --context k3d-hub -n gogs port-forward svc/gogs 30300:3000
 # usuário: gitadmin / senha: definida em scripts/05-push-to-gogs.sh (GOGS_ADMIN_PASSWORD)
 ```
 

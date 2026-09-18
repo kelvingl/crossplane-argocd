@@ -9,7 +9,7 @@ GOGS_ADMIN_USER="gitadmin"
 GOGS_ADMIN_PASSWORD="ChangeMe123!"
 GOGS_ADMIN_EMAIL="admin@lab.local"
 REPO_NAME="platform"
-LOCAL_PORT="3000"
+LOCAL_PORT="30300"  # porta 3000 local costuma já estar em uso por outra coisa
 
 cleanup() {
   if [ -n "${PF_PID:-}" ]; then
