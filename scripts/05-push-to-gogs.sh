@@ -19,7 +19,9 @@ cleanup() {
 trap cleanup EXIT
 
 echo "==> criando usuário admin no gogs (ignora erro se já existir)"
-kubectl --context k3d-hub -n gogs exec deploy/gogs -- \
+# MSYS_NO_PATHCONV evita que o Git Bash reescreva "/app/gogs/gogs" (caminho
+# dentro do container) como um caminho de arquivo do Windows.
+MSYS_NO_PATHCONV=1 kubectl --context k3d-hub -n gogs exec deploy/gogs -- \
   /app/gogs/gogs admin create-user \
     --name "$GOGS_ADMIN_USER" \
     --password "$GOGS_ADMIN_PASSWORD" \
@@ -49,8 +51,12 @@ if [ ! -d .git ]; then
   git init -b main
 fi
 git add -A
-git -c user.email="${GOGS_ADMIN_EMAIL}" -c user.name="lab-bootstrap" \
-  commit -m "Initial platform GitOps config" --allow-empty
+if ! git diff --cached --quiet; then
+  git -c user.email="${GOGS_ADMIN_EMAIL}" -c user.name="lab-bootstrap" \
+    commit -m "Sync platform GitOps config"
+else
+  echo "==> nada para commitar, seguindo com o push do que já existe"
+fi
 
 git remote remove gogs 2>/dev/null || true
 git remote add gogs "http://${GOGS_ADMIN_USER}:${GOGS_ADMIN_PASSWORD}@localhost:${LOCAL_PORT}/${GOGS_ADMIN_USER}/${REPO_NAME}.git"
