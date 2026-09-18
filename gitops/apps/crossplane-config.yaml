@@ -11,8 +11,6 @@ spec:
     repoURL: http://gogs.gogs.svc.cluster.local:3000/gitadmin/platform.git
     targetRevision: main
     path: crossplane/config
-    directory:
-      recurse: false
   destination:
     server: https://kubernetes.default.svc
     namespace: crossplane-system
