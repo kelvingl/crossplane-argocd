@@ -83,7 +83,7 @@ kubectl --context k3d-hub -n argocd port-forward svc/argocd-server 8081:443
 
 # Gogs -> http://localhost:3000
 kubectl --context k3d-hub -n gogs port-forward svc/gogs 3000:3000
-# usuário: admin / senha: definida em scripts/05-push-to-gogs.sh (GOGS_ADMIN_PASSWORD)
+# usuário: gitadmin / senha: definida em scripts/05-push-to-gogs.sh (GOGS_ADMIN_PASSWORD)
 ```
 
 ## Estrutura

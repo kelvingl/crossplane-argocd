@@ -5,7 +5,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-GOGS_ADMIN_USER="admin"
+GOGS_ADMIN_USER="gitadmin"
 GOGS_ADMIN_PASSWORD="ChangeMe123!"
 GOGS_ADMIN_EMAIL="admin@lab.local"
 REPO_NAME="platform"
@@ -20,9 +20,12 @@ trap cleanup EXIT
 
 echo "==> criando usuário admin no gogs (ignora erro se já existir)"
 # MSYS_NO_PATHCONV evita que o Git Bash reescreva "/app/gogs/gogs" (caminho
-# dentro do container) como um caminho de arquivo do Windows.
+# dentro do container) como um caminho de arquivo do Windows. "kubectl exec"
+# entra no container como root, mas o Gogs está configurado para rodar como
+# o usuário "git" (RUN_USER) e recusa comandos executados como outro
+# usuário — por isso usamos "gosu git" para trocar de usuário antes.
 MSYS_NO_PATHCONV=1 kubectl --context k3d-hub -n gogs exec deploy/gogs -- \
-  /app/gogs/gogs admin create-user \
+  gosu git /app/gogs/gogs admin create-user \
     --name "$GOGS_ADMIN_USER" \
     --password "$GOGS_ADMIN_PASSWORD" \
     --email "$GOGS_ADMIN_EMAIL" \

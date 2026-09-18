@@ -4,9 +4,9 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-GOGS_ADMIN_USER="admin"
+GOGS_ADMIN_USER="gitadmin"
 GOGS_ADMIN_PASSWORD="ChangeMe123!"
-REPO_URL="http://gogs.gogs.svc.cluster.local:3000/admin/platform.git"
+REPO_URL="http://gogs.gogs.svc.cluster.local:3000/gitadmin/platform.git"
 
 echo "==> registrando repository do gogs no argocd"
 kubectl --context k3d-hub -n argocd create secret generic gogs-platform-repo \

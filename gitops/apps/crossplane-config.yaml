@@ -8,7 +8,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: http://gogs.gogs.svc.cluster.local:3000/admin/platform.git
+    repoURL: http://gogs.gogs.svc.cluster.local:3000/gitadmin/platform.git
     targetRevision: main
     path: crossplane/config
     directory:
