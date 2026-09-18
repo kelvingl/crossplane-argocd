@@ -5,7 +5,10 @@ kubectl --context k3d-hub create namespace argocd \
   --dry-run=client -o yaml | kubectl --context k3d-hub apply -f -
 
 echo "==> instalando argocd (stable)"
-kubectl --context k3d-hub apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+# --server-side: o CRD do ApplicationSet é grande demais para caber na
+# anotação last-applied-configuration que o "apply" client-side normal usa.
+kubectl --context k3d-hub apply --server-side --force-conflicts \
+  -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
 
 echo "==> aguardando argocd-server"
 kubectl --context k3d-hub -n argocd rollout status deployment/argocd-server --timeout=300s
