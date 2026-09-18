@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
 # Cria os 3 clusters k3d (hub, spoke-01, spoke-02) na mesma rede docker
-# "hublab", para que o hub consiga alcançar a API dos spokes pelo nome do
-# container. Cada spoke recebe --tls-san com o nome do seu container de
-# server, senão a validação TLS falha quando o hub conecta por esse nome.
+# "hublab". O k3d já inclui o nome do container do server (ex.
+# k3d-spoke-01-server-0) nos SANs do certificado por padrão, então nenhuma
+# flag extra de TLS é necessária aqui. Nesta rede docker (Rancher Desktop),
+# porém, a resolução de nome de container não funciona de dentro de outro
+# container (não é o DNS embutido clássico do Docker), então
+# scripts/03-register-spokes.sh usa o IP do container do spoke, não o nome,
+# e desativa a verificação de TLS no kubeconfig gerado para o
+# ProviderConfig (lab local — sem isso o hub não alcança o spoke).
 set -euo pipefail
 
 NETWORK="hublab"
@@ -21,8 +26,8 @@ create_cluster() {
 }
 
 create_cluster hub
-create_cluster spoke-01 --tls-san k3d-spoke-01-server-0
-create_cluster spoke-02 --tls-san k3d-spoke-02-server-0
+create_cluster spoke-01
+create_cluster spoke-02
 
 kubectl config use-context k3d-hub
 

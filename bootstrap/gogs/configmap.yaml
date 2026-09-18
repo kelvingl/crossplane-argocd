@@ -8,8 +8,8 @@ data:
     RUN_MODE = prod
 
     [database]
-    DB_TYPE = sqlite3
-    PATH    = /data/gogs/data/gogs.db
+    TYPE = sqlite3
+    PATH = /data/gogs/data/gogs.db
 
     [repository]
     ROOT = /data/gogs/git/gogs-repositories
@@ -17,19 +17,19 @@ data:
     [server]
     DOMAIN           = gogs.gogs.svc.cluster.local
     HTTP_PORT        = 3000
-    ROOT_URL         = http://gogs.gogs.svc.cluster.local:3000/
+    EXTERNAL_URL     = http://gogs.gogs.svc.cluster.local:3000/
     DISABLE_SSH      = true
     START_SSH_SERVER = false
-    LANDING_PAGE     = explore
+    LANDING_URL      = /explore
 
     [security]
     INSTALL_LOCK = true
     SECRET_KEY   = lab-secret-key-change-me
 
-    [service]
+    [auth]
     DISABLE_REGISTRATION  = false
     REQUIRE_SIGNIN_VIEW   = false
-    ENABLE_CAPTCHA        = false
+    ENABLE_REGISTRATION_CAPTCHA = false
 
     [log]
     MODE      = console
