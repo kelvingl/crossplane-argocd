@@ -76,14 +76,39 @@ kubectl --context k3d-spoke-02 -n dp-demo-02 get deploy,svc
 
 ### Acessar as UIs
 
-```bash
-# ArgoCD -> https://localhost:8081
-kubectl --context k3d-hub -n argocd port-forward svc/argocd-server 8081:443
-# usuário: admin / senha: scripts/06-install-argocd.sh imprime a senha inicial
+**Opção 1: via nip.io (Traefik Ingress)**
 
-# Gogs -> http://localhost:30300 (3000 local costuma já estar em uso por outra coisa)
-kubectl --context k3d-hub -n gogs port-forward svc/gogs 30300:3000
-# usuário: gitadmin / senha: definida em scripts/05-push-to-gogs.sh (GOGS_ADMIN_PASSWORD)
+Adicione ao seu `/etc/hosts` (ou `C:\Windows\System32\drivers\etc\hosts` no Windows):
+
+```
+127.0.0.1 argocd.127-0-0-1.nip.io
+127.0.0.1 git.127-0-0-1.nip.io
+```
+
+Depois acesse:
+- **ArgoCD**: http://argocd.127-0-0-1.nip.io (ou https com verificação de certificado desativada)
+- **Gogs**: http://git.127-0-0-1.nip.io
+
+Credenciais:
+- ArgoCD: `admin` / senha em `scripts/06-install-argocd.sh`
+- Gogs: `gitadmin` / `ChangeMe123!`
+
+**Opção 2: via port-forward (mais simples)**
+
+```bash
+./scripts/09-port-forward.sh
+# ArgoCD -> https://localhost:8080 (ignore certificado auto-assinado)
+# Gogs -> http://localhost:3000
+```
+
+Ou manualmente:
+
+```bash
+# ArgoCD (HTTPS)
+kubectl --context k3d-hub -n argocd port-forward svc/argocd-server 8080:443
+
+# Gogs (HTTP)
+kubectl --context k3d-hub -n gogs port-forward svc/gogs 3000:3000
 ```
 
 ## Estrutura
