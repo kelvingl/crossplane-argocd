@@ -76,7 +76,7 @@ kubectl --context k3d-spoke-02 -n dp-demo-02 get deploy,svc
 
 ### Acessar as UIs
 
-**Opção 1: via nip.io (HTTPS com Traefik + cert-manager)**
+**Opção 1: via nip.io (HTTPS direto na porta 443 do host)**
 
 Adicione ao seu `/etc/hosts` (ou `C:\Windows\System32\drivers\etc\hosts` no Windows):
 
@@ -85,7 +85,7 @@ Adicione ao seu `/etc/hosts` (ou `C:\Windows\System32\drivers\etc\hosts` no Wind
 127.0.0.1 git.127-0-0-1.nip.io
 ```
 
-Depois acesse (ignore avisos de certificado auto-assinado/não confiável):
+Depois acesse direto (ignore avisos de certificado auto-assinado/não confiável):
 - **ArgoCD**: https://argocd.127-0-0-1.nip.io
 - **Gogs**: https://git.127-0-0-1.nip.io
 
@@ -93,26 +93,22 @@ Credenciais:
 - ArgoCD: `admin` / senha em `scripts/06-install-argocd.sh`
 - Gogs: `gitadmin` / `ChangeMe123!`
 
-**Opção 2: via port-forward (mais simples, localhost)**
+**Opção 2: via port-forward (alternativa)**
 
 ```bash
 ./scripts/09-port-forward.sh
 ```
 
 Depois:
-- **ArgoCD HTTPS**: https://localhost:8443 (com `-H 'Host: argocd.127-0-0-1.nip.io'` ou acessar os domínios nip.io após editar `/etc/hosts`)
-- **Gogs HTTPS**: https://localhost:8443 (com `-H 'Host: git.127-0-0-1.nip.io'`)
+- **ArgoCD HTTPS**: https://localhost:8443
+- **Gogs HTTPS**: https://localhost:8443
 - **HTTP redirect**: http://localhost:8080 (redireciona para HTTPS)
 
-Exemplo com curl:
-```bash
-curl -k -H 'Host: argocd.127-0-0-1.nip.io' https://localhost:8443/
-```
-
 **Certificados:**
-- Todos os certificados HTTPS são auto-assinados e gerados pelo cert-manager usando uma CA interna do cluster
-- CA ClusterIssuer: `lab-ca-issuer`
-- Certificados gerados automaticamente para cada Ingress
+- Todos os certificados HTTPS são auto-assinados pelo cluster
+- CA interna: `lab-ca-issuer` (gerada automaticamente)
+- Certificados renovam automaticamente 30 dias antes do vencimento
+- Porter 80 e 443 do Traefik (LoadBalancer) estão expostas no host via k3d
 
 ## Estrutura
 
