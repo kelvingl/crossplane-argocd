@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-cmd-params-cm
+  namespace: argocd
+data:
+  server.insecure: "true"
+  # "cache: key is missing" errors (argoproj/argo-cd#15912) show up when
+  # components disagree on how cached values are compressed — easy to hit in
+  # this lab since we restart argocd-redis independently of the other
+  # components while iterating. Disabling compression removes the mismatch
+  # instead of just symptom-fixing it with another restart each time.
+  redis.compression: "none"
