@@ -1,0 +1,6 @@
+apiVersion: v2
+name: dataplane-advanced
+description: Advanced dataplane Composition backed by a Golang Composition Function, Helm-packaged per constitution v1.1.0
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

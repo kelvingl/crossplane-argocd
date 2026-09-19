@@ -1,0 +1,4 @@
+spoke: ""
+image: nginxdemos/hello
+replicas: 1
+config: {}

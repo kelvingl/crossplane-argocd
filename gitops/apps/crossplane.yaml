@@ -13,6 +13,10 @@ spec:
     targetRevision: 1.20.13
     helm:
       releaseName: crossplane
+      values: |
+        registryCaBundleConfig:
+          name: lab-ca-bundle
+          key: ca.crt
   destination:
     server: https://kubernetes.default.svc
     namespace: crossplane-system

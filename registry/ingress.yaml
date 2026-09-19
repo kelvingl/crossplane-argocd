@@ -1,0 +1,17 @@
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: registry-ingressroute
+  namespace: registry
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`registry.127-0-0-1.nip.io`)
+      kind: Rule
+      services:
+        - name: registry
+          port: 5000
+          scheme: https
+  tls:
+    secretName: registry-tls

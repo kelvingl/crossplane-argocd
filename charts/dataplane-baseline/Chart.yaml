@@ -1,0 +1,6 @@
+apiVersion: v2
+name: dataplane-baseline
+description: Feature-001 baseline dataplane Composition (classic Patch-and-Transform), Helm-packaged per constitution v1.1.0
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

@@ -1,0 +1,53 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xdataplaneadvanceds.lab.example.org
+spec:
+  group: lab.example.org
+  names:
+    kind: XDataPlaneAdvanced
+    plural: xdataplaneadvanceds
+  claimNames:
+    kind: AdvancedDataPlane
+    plural: advanceddataplanes
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                parameters:
+                  type: object
+                  properties:
+                    spoke:
+                      type: string
+                      description: >-
+                        Nome do spoke (dataplane) alvo. Deve corresponder ao
+                        nome de um ProviderConfig do provider-kubernetes
+                        (ex: spoke-01, spoke-02).
+                    image:
+                      type: string
+                      description: Imagem do workload provisionado no spoke.
+                      default: nginxdemos/hello
+                    replicas:
+                      type: integer
+                      description: Número de réplicas do workload no spoke.
+                      default: 1
+                      minimum: 1
+                    config:
+                      type: object
+                      additionalProperties:
+                        type: string
+                      description: >-
+                        Dados livres renderizados no ConfigMap composto junto
+                        ao workload.
+                      default: {}
+                  required:
+                    - spoke
+              required:
+                - parameters

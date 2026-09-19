@@ -1,0 +1,21 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: registry-tls
+  namespace: registry
+spec:
+  secretName: registry-tls
+  issuerRef:
+    name: lab-ca-issuer
+    kind: ClusterIssuer
+  dnsNames:
+    - registry.127-0-0-1.nip.io
+    - registry.registry.svc.cluster.local
+    - registry.registry.svc
+    - registry.registry
+    - registry
+  ipAddresses:
+    # containerd's registry mirror verifies TLS against the redirect
+    # endpoint's literal IP, not the original hostname — see
+    # scripts/12-configure-hub-registry-mirror.sh.
+    - 10.43.0.50

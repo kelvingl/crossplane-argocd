@@ -1,0 +1,38 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: dataplanes
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  generators:
+    - git:
+        repoURL: http://gogs.gogs.svc.cluster.local:3000/gitadmin/dataplanes.git
+        revision: main
+        directories:
+          - path: "*"
+  template:
+    metadata:
+      name: "dataplane-{{path.basename}}"
+      namespace: argocd
+    spec:
+      project: default
+      sources:
+        - repoURL: http://gogs.gogs.svc.cluster.local:3000/gitadmin/platform.git
+          targetRevision: main
+          path: charts/dataplane-instance
+          helm:
+            releaseName: "{{path.basename}}"
+            valueFiles:
+              - $values/{{path.basename}}/values.yaml
+        - repoURL: http://gogs.gogs.svc.cluster.local:3000/gitadmin/dataplanes.git
+          targetRevision: main
+          ref: values
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: default
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true

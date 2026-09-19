@@ -1,0 +1,7 @@
+apiVersion: pkg.crossplane.io/v1
+kind: Function
+metadata:
+  name: dataplane-function
+spec:
+  package: {{ .Values.function.image | quote }}
+  packagePullPolicy: Always

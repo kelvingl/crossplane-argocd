@@ -1,0 +1,16 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xdataplaneadvanceds.lab.example.org
+  labels:
+    lab.example.org/provider: kubernetes
+    lab.example.org/mode: pipeline
+spec:
+  compositeTypeRef:
+    apiVersion: lab.example.org/v1alpha1
+    kind: XDataPlaneAdvanced
+  mode: Pipeline
+  pipeline:
+    - step: compose-dataplane
+      functionRef:
+        name: dataplane-function

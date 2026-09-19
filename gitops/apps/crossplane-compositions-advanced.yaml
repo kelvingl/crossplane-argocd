@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: crossplane-compositions
+  name: crossplane-compositions-advanced
   namespace: argocd
   annotations:
     argocd.argoproj.io/sync-wave: "1"
@@ -10,9 +10,9 @@ spec:
   source:
     repoURL: http://gogs.gogs.svc.cluster.local:3000/gitadmin/platform.git
     targetRevision: main
-    path: charts/dataplane-baseline
+    path: charts/dataplane-advanced
     helm:
-      releaseName: dataplane-baseline
+      releaseName: dataplane-advanced
   destination:
     server: https://kubernetes.default.svc
     namespace: crossplane-system
