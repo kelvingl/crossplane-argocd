@@ -140,8 +140,8 @@ charts/
 
 gitops/apps/
 ├── registry.yaml                    # NEW — sync-wave 0, directory source → registry/
-├── crossplane-compositions.yaml     # EDITED — directory → helm (charts/dataplane-baseline)
-├── crossplane-compositions-advanced.yaml  # NEW — sync-wave 1, helm (charts/dataplane-advanced)
+├── crossplane-compositions.yaml     # EDITED — directory → helm (compositions/dataplane-baseline/chart)
+├── crossplane-compositions-advanced.yaml  # NEW — sync-wave 1, helm (compositions/dataplane-advanced/chart)
 └── dataplanes-appset.yaml           # NEW — ApplicationSet, git-directories generator over
                                       #       the `dataplanes` Gogs repo, multi-source Helm
                                       #       release per directory (chart from this repo,

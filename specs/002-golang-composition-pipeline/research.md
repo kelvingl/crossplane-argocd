@@ -92,10 +92,10 @@ learn.
 ## Decision: Helm packaging for every Composition, including the pre-existing one
 
 **Decision**: Wrap feature 001's `XDataPlane`/`DataPlane` XRD+Composition into a
-minimal Helm chart (`charts/dataplane-baseline/`) with no behavioral change to the
+minimal Helm chart (`compositions/dataplane-baseline/chart/`) with no behavioral change to the
 rendered manifests, and switch `gitops/apps/crossplane-compositions.yaml`'s source
 from `directory` to `helm`. The new advanced Composition ships directly as a chart
-(`charts/dataplane-advanced/`) from day one.
+(`compositions/dataplane-advanced/chart/`) from day one.
 
 **Rationale**: Directly required by the amended constitution (v1.1.0: "Any
 Composition... that ArgoCD installs or upgrades MUST be packaged and released as a
@@ -115,7 +115,7 @@ byte-for-byte, just moved under a chart with an (initially unused) `values.yaml`
 `git` generator's `directories` mode against the new `dataplanes` Gogs repo (one
 entry per top-level directory) to generate one ArgoCD `Application` per dataplane.
 Each generated Application is a **multi-source** Application: source 1 is this
-platform repo's `charts/dataplane-instance` Helm chart (a tiny chart templating one
+platform repo's `compositions/dataplane-advanced/instance-chart` Helm chart (a tiny chart templating one
 `AdvancedDataPlane` claim), source 2 is the matching directory in the `dataplanes`
 repo referenced as `$values`, with `helm.valueFiles: ['$values/<dir>/values.yaml']`.
 

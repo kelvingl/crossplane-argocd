@@ -21,7 +21,7 @@ spec:
       sources:
         - repoURL: http://gogs.gogs.svc.cluster.local:3000/gitadmin/platform.git
           targetRevision: main
-          path: charts/dataplane-instance
+          path: compositions/dataplane-advanced/instance-chart
           helm:
             releaseName: "{{path.basename}}"
             valueFiles:

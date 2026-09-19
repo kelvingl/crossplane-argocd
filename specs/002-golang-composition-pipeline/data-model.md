@@ -3,7 +3,7 @@
 ## Advanced Dataplane Request
 
 Maps to the `AdvancedDataPlane` claim (Crossplane `Claim` kind for XRD
-`XDataPlaneAdvanced`, `charts/dataplane-advanced/templates/xrd-dataplane-advanced.yaml`).
+`XDataPlaneAdvanced`, `compositions/dataplane-advanced/chart/templates/xrd-dataplane-advanced.yaml`).
 In practice, every instance is rendered by the tiny `dataplane-instance` chart from a
 directory in the `dataplanes` repo (see "Dataplane Instance" below) rather than
 hand-written, but the claim shape itself is what that chart templates.

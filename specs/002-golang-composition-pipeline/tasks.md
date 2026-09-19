@@ -46,7 +46,7 @@ recorded inline below:
 **Purpose**: Scaffolding for all new artifacts, no cluster changes yet.
 
 - [x] T001 [P] Create `registry/` directory in this repo for the private registry's manifests
-- [x] T002 [P] Create `charts/dataplane-baseline/`, `charts/dataplane-advanced/`, `charts/dataplane-instance/` directories with `Chart.yaml` stubs (`apiVersion: v2`, `type: application`)
+- [x] T002 [P] Create `compositions/dataplane-baseline/chart/`, `compositions/dataplane-advanced/chart/`, `compositions/dataplane-advanced/instance-chart/` directories with `Chart.yaml` stubs (`apiVersion: v2`, `type: application`)
 - [x] T003 [P] Create the Composition Function's Go source location — **implemented as `function/` inside this repo** (deviation 1 above), not a separate working copy
 - [x] T004 [P] Create local working copy `../dataplanes/` (`git init`) for the dataplane instance declarations
 
@@ -74,9 +74,9 @@ already be Helm-delivered.
 - [x] T012 [P] Write `function/Dockerfile` (multi-stage Go build → distroless runtime image) and `function/Makefile` (docker build → `crossplane xpkg build` → `crossplane xpkg push`; Crossplane Function packages are xpkg-wrapped OCI images, not bare runtime images, so building one requires the `crossplane` CLI, not just `docker build`)
 - [x] T013 Build and push `dataplane-function:v0.1.0` (later `v0.1.1`, see T031) to the private registry; confirmed pullable and the `Function` resource reaches `INSTALLED: True, HEALTHY: True`
 - [x] T013a *(new, not in original plan)* Write `scripts/12-configure-hub-registry-mirror.sh`: registers a containerd `registries.yaml` mirror on the hub node redirecting `registry.registry.svc.cluster.local:5000` to the registry's fixed ClusterIP, with the lab CA trusted under both the original hostname and the IP (containerd's mirror client verifies TLS against the literal endpoint it connects to, not the original name) — required because node-level image pulls happen outside any pod's network namespace and can't resolve cluster-internal DNS
-- [x] T014 [P] Move `crossplane/compositions/xrd-dataplane.yaml` content into `charts/dataplane-baseline/templates/xrd-dataplane.yaml` unchanged (verified byte-identical render via `helm template | diff`)
-- [x] T015 [P] Move `crossplane/compositions/composition-dataplane-k8s.yaml` content into `charts/dataplane-baseline/templates/composition-dataplane-k8s.yaml` unchanged (same verification)
-- [x] T016 Update `gitops/apps/crossplane-compositions.yaml` source from `directory` to `helm`/`path: charts/dataplane-baseline`
+- [x] T014 [P] Move `crossplane/compositions/xrd-dataplane.yaml` content into `compositions/dataplane-baseline/chart/templates/xrd-dataplane.yaml` unchanged (verified byte-identical render via `helm template | diff`)
+- [x] T015 [P] Move `crossplane/compositions/composition-dataplane-k8s.yaml` content into `compositions/dataplane-baseline/chart/templates/composition-dataplane-k8s.yaml` unchanged (same verification)
+- [x] T016 Update `gitops/apps/crossplane-compositions.yaml` source from `directory` to `helm`/`path: compositions/dataplane-baseline/chart`
 - [x] T017 Sync and verify `crossplane-compositions` `Synced`/`Healthy`; feature 001's `demo-01`/`demo-02` example claims re-applied and confirmed `Ready: "True"` (non-regression, spec FR-010) after a naming-collision incident was resolved — see Status note 2 above
 - [x] T018 Write `scripts/11-push-dataplanes-repo.sh` — **scoped to the `dataplanes` repo only** (deviation 1: no separate function repo to push); creates the Gogs repo, pushes the working copy, and registers it as an ArgoCD `Repository` Secret
 
@@ -99,11 +99,11 @@ Service) — see `quickstart.md` Story 1.
 
 ### Implementation for User Story 1
 
-- [x] T019 [US1] Write `charts/dataplane-advanced/templates/xrd-dataplane-advanced.yaml` (`xdataplaneadvanceds.lab.example.org` / claim `AdvancedDataPlane`, `spoke` required, `image`/`replicas`/`config` optional with defaults)
-- [x] T020 [US1] Write `charts/dataplane-advanced/templates/function.yaml` (`Function` resource, `spec.package` from `.Values.function.image`, default `registry.registry.svc.cluster.local:5000/dataplane-function:v0.1.1`)
-- [x] T021 [US1] Write `charts/dataplane-advanced/templates/composition-dataplane-advanced.yaml` (`spec.mode: Pipeline`, one step calling the Function)
-- [x] T022 [US1] Create `gitops/apps/crossplane-compositions-advanced.yaml` ArgoCD Application (`helm` source → `charts/dataplane-advanced`, sync-wave `"1"`)
-- [x] T023 [US1] Write `charts/dataplane-instance/values.yaml` + `charts/dataplane-instance/templates/claim.yaml` (renders one `AdvancedDataPlane` named after `.Release.Name`; `fail`s fast if `spoke` is unset)
+- [x] T019 [US1] Write `compositions/dataplane-advanced/chart/templates/xrd-dataplane-advanced.yaml` (`xdataplaneadvanceds.lab.example.org` / claim `AdvancedDataPlane`, `spoke` required, `image`/`replicas`/`config` optional with defaults)
+- [x] T020 [US1] Write `compositions/dataplane-advanced/chart/templates/function.yaml` (`Function` resource, `spec.package` from `.Values.function.image`, default `registry.registry.svc.cluster.local:5000/dataplane-function:v0.1.1`)
+- [x] T021 [US1] Write `compositions/dataplane-advanced/chart/templates/composition-dataplane-advanced.yaml` (`spec.mode: Pipeline`, one step calling the Function)
+- [x] T022 [US1] Create `gitops/apps/crossplane-compositions-advanced.yaml` ArgoCD Application (`helm` source → `compositions/dataplane-advanced/chart`, sync-wave `"1"`)
+- [x] T023 [US1] Write `compositions/dataplane-advanced/instance-chart/values.yaml` + `compositions/dataplane-advanced/instance-chart/templates/claim.yaml` (renders one `AdvancedDataPlane` named after `.Release.Name`; `fail`s fast if `spoke` is unset)
 - [x] T024 [US1] Write `gitops/apps/dataplanes-appset.yaml` (`ApplicationSet`, git `directories` generator over the `dataplanes` repo, multi-source: chart from this repo + `$values` from the matching `dataplanes` directory)
 - [x] T025 [US1] [P] Add `../dataplanes/adv-01/values.yaml` (`spoke: spoke-01`) — **named `adv-01`, not `demo-01`** (Status note 2)
 - [x] T026 [US1] [P] Add `../dataplanes/adv-02/values.yaml` (`spoke: spoke-02`, `replicas: 2`) — named `adv-02`
@@ -122,7 +122,7 @@ purely via a Helm chart release — no manifest applied by hand, nothing pulled 
 outside the lab.
 
 **Independent Test**: Change the function's code, build+push a new tag, bump
-`charts/dataplane-advanced/values.yaml`'s image tag, and confirm the running
+`compositions/dataplane-advanced/chart/values.yaml`'s image tag, and confirm the running
 `Function` resource updates via ArgoCD's Helm sync alone — see `quickstart.md`
 Story 2.
 
@@ -130,7 +130,7 @@ Story 2.
 
 - [x] T030 [US2] Reusable build+push tooling — **`function/Makefile`** (`image`/`xpkg`/`push` targets), not a separate `scripts/12-build-push-function.sh` (`scripts/12-*` was already taken by the registry-mirror script, T013a; the Makefile is the more natural home for a Go project's build steps anyway)
 - [x] T031 [US2] Made a real, observable change to `function/fn.go` (explicit `Ready: resource.ReadyTrue`, T011's readiness fix — discovered *because* US1 initially failed to reach `Ready`), built+pushed as `v0.1.1`
-- [x] T032 [US2] Bumped `charts/dataplane-advanced/values.yaml`'s `function.image` tag to `v0.1.1`, applied via the chart, confirmed the `Function` resource's `spec.package` updated
+- [x] T032 [US2] Bumped `compositions/dataplane-advanced/chart/values.yaml`'s `function.image` tag to `v0.1.1`, applied via the chart, confirmed the `Function` resource's `spec.package` updated
 - [x] T033 [US2] Verified: `Function` `HEALTHY: True` on the new tag, runtime pod running the new image, no manifest applied by hand outside the chart/Function resource
 
 **Checkpoint**: User Stories 1 AND 2 both proven working (the v0.1.0 → v0.1.1 upgrade

@@ -2,8 +2,8 @@
 
 Proves User Stories 1, 2, and 3 from `spec.md` end-to-end. Run after
 `scripts/00-up.sh` (feature 001's platform) and this feature's setup:
-build+push the function image (`function/Makefile`, or the equivalent
-`docker build` + `crossplane xpkg build` + `crossplane xpkg push` steps) and
+build+push the function image (`make release-dataplane-advanced` from the repo
+root, or `make -C compositions/dataplane-advanced/function` directly) and
 `scripts/11-push-dataplanes-repo.sh` (creates the `dataplanes` Gogs repo and
 registers it with ArgoCD).
 
@@ -70,11 +70,12 @@ kubectl --context k3d-spoke-01 -n dp-adv-03 get deploy,svc,cm
 ## Story 2 — update the composition function and roll it out via Helm
 
 ```bash
-# from function/, after changing main.go
-make -C function TAG=v0.2.0            # docker build + xpkg build + xpkg push
-# (no `make` on Windows/Git Bash: run the three commands from function/Makefile by hand)
+# after changing compositions/dataplane-advanced/function/fn.go
+make release-dataplane-advanced TAG=v0.2.0   # docker build + xpkg build + xpkg push
+# (no `make` on Windows/Git Bash: run the steps in
+#  compositions/dataplane-advanced/function/Makefile by hand)
 
-# bump charts/dataplane-advanced/values.yaml's image tag to v0.2.0, commit+push
+# bump compositions/dataplane-advanced/chart/values.yaml's image tag to v0.2.0, commit+push
 # (both to origin/GitHub and to the gogs remote, per Development Workflow)
 
 kubectl --context k3d-hub -n argocd get application crossplane-compositions-advanced

@@ -1,6 +1,6 @@
 REGISTRY       ?= registry.127-0-0-1.nip.io
 IMAGE_NAME     ?= dataplane-function
-TAG            ?= v0.1.0
+TAG            ?= v0.1.1
 
 RUNTIME_IMAGE  := $(IMAGE_NAME)-runtime:$(TAG)
 PACKAGE_IMAGE  := $(REGISTRY)/$(IMAGE_NAME):$(TAG)
@@ -8,10 +8,17 @@ PACKAGE_FILE   := $(IMAGE_NAME).xpkg
 
 CROSSPLANE     ?= crossplane
 DOCKER         ?= docker
+GO             ?= go
 
-.PHONY: all build image xpkg push clean
+.PHONY: all build build_go image xpkg push clean
 
 all: build push
+
+## build_go: compile-check only — fastest feedback while editing fn.go, no
+## Docker/xpkg involved
+build_go:
+	$(GO) vet ./...
+	$(GO) build -o /dev/null .
 
 ## build: build the Go binary's runtime image and wrap it as a Crossplane xpkg
 build: image xpkg
