@@ -25,7 +25,7 @@ create_cluster() {
   fi
 }
 
-create_cluster hub
+create_cluster hub -p "80:80@loadbalancer" -p "443:443@loadbalancer"
 create_cluster spoke-01
 create_cluster spoke-02
 
