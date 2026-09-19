@@ -1,18 +1,18 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: argocd-ingress
-  namespace: argocd
+  name: gogs-ingress
+  namespace: gogs
 spec:
   ingressClassName: traefik
   rules:
-    - host: argocd.127-0-0-1.nip.io
+    - host: git.127-0-0-1.nip.io
       http:
         paths:
           - path: /
             pathType: Prefix
             backend:
               service:
-                name: argocd-server
+                name: gogs
                 port:
-                  number: 80
+                  number: 3000
