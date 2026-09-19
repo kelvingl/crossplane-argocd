@@ -134,7 +134,7 @@ Depois acesse direto (ignore avisos de certificado auto-assinado/não confiável
 - **Gogs**: https://git.127-0-0-1.nip.io
 
 Credenciais:
-- ArgoCD: `admin` / senha em `scripts/06-install-argocd.sh`
+- ArgoCD: **sem login** — acesso anônimo habilitado com role `admin` (lab local, sem exposição externa; ver `scripts/06-install-argocd.sh`). Se preferir reativar o login, remova `users.anonymous.enabled` do `argocd-cm` e `policy.default` do `argocd-rbac-cm` — a senha inicial do admin continua disponível em `argocd-initial-admin-secret` (`kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d`).
 - Gogs: `gitadmin` / `ChangeMe123!`
 
 **Opção 2: via port-forward (alternativa)**

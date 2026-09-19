@@ -14,7 +14,14 @@ echo "==> aguardando argocd-server"
 kubectl --context k3d-hub -n argocd rollout status deployment/argocd-server --timeout=300s
 kubectl --context k3d-hub -n argocd rollout status deployment/argocd-repo-server --timeout=300s
 
-echo "==> senha inicial do admin:"
-kubectl --context k3d-hub -n argocd get secret argocd-initial-admin-secret \
-  -o jsonpath='{.data.password}' | base64 -d
-echo
+# Lab local, sem exposição externa real: desliga o login do ArgoCD em vez de
+# usar uma senha fixa (ex: admin/admin). Acesso anônimo vira admin.
+echo "==> habilitando acesso anônimo (role:admin) — sem login, lab-only"
+kubectl --context k3d-hub -n argocd patch cm argocd-cm --type merge \
+  -p '{"data":{"users.anonymous.enabled":"true"}}'
+kubectl --context k3d-hub -n argocd patch cm argocd-rbac-cm --type merge \
+  -p '{"data":{"policy.default":"role:admin"}}'
+kubectl --context k3d-hub -n argocd rollout restart deployment/argocd-server
+kubectl --context k3d-hub -n argocd rollout status deployment/argocd-server --timeout=120s
+
+echo "==> login desligado: qualquer acesso ao ArgoCD já entra como admin"
