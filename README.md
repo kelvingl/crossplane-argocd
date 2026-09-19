@@ -29,7 +29,8 @@ Lab local com **k3d + ArgoCD (app of apps) + Crossplane (hub and spoke) + Gogs**
 - **Spokes**: clusters `spoke-01` e `spoke-02` são os *dataplanes* — não rodam Crossplane nem ArgoCD, apenas recebem recursos provisionados a partir do hub via `provider-kubernetes`.
 - **App of apps**: uma única `Application` raiz (`gitops/root/app-of-apps.yaml`) aponta para `gitops/apps/`, que contém uma `Application` filha por componente da plataforma (Gogs, Crossplane core, Providers, ProviderConfigs, Compositions). Cada filha tem uma `sync-wave` para ordenar a instalação.
 - **Hub and spoke no Crossplane**: cada spoke é registrado no hub como um `ProviderConfig` do `provider-kubernetes`, apontando para um `Secret` com o kubeconfig do spoke (criado fora do Git, via script). A Composition de teste usa esse `ProviderConfig` para decidir em qual spoke provisionar o recurso.
-- **Composition de teste**: XRD `XDataPlane` / claim `DataPlane` que cria `Namespace + Deployment + Service` no spoke escolhido (`spec.parameters.spoke: spoke-01|spoke-02`), demonstrando o modelo hub-and-spoke provisionando um "dataplane" real.
+- **Composition baseline**: XRD `XDataPlane` / claim `DataPlane` (Patch-and-Transform clássico) que cria `Namespace + Deployment + Service` no spoke escolhido (`spec.parameters.spoke: spoke-01|spoke-02`), demonstrando o modelo hub-and-spoke provisionando um "dataplane" real.
+- **Composition avançada (Golang)**: XRD `XDataPlaneAdvanced` / claim `AdvancedDataPlane`, composta por uma **Crossplane Composition Function em Go** (`function/`), que cria `Namespace + ConfigMap + Deployment (com resources/labels padronizados) + Service`. A imagem da function é publicada num **registry OCI privado** (`registry/`) rodando no hub. Cada instância de dataplane avançado é declarada como uma pasta com `values.yaml` no repositório Gogs `dataplanes` (repo próprio, separado da plataforma); um `ApplicationSet` do ArgoCD transforma cada pasta numa release Helm. Toda Composition (baseline e avançada) é instalada/atualizada via **Helm chart** (`charts/`), nunca por diretório solto. Veja [specs/002-golang-composition-pipeline/](specs/002-golang-composition-pipeline/) para o design completo.
 
 ## Pré-requisitos
 
@@ -59,7 +60,7 @@ Ou tudo de uma vez:
 
 Depois disso o ArgoCD assume a gestão de Gogs, Crossplane core, providers, providerconfigs e compositions via Git.
 
-### Testar a composition (hub and spoke)
+### Testar a composition baseline (hub and spoke)
 
 ```bash
 kubectl --context k3d-hub apply -f crossplane/examples/claim-dataplane-spoke-01.yaml
@@ -73,6 +74,49 @@ kubectl --context k3d-hub get managed   # Objects criados pelo provider-kubernet
 kubectl --context k3d-spoke-01 -n dp-demo-01 get deploy,svc
 kubectl --context k3d-spoke-02 -n dp-demo-02 get deploy,svc
 ```
+
+### Testar a composition avançada (Golang) e o repositório `dataplanes`
+
+Setup (uma vez): builda e publica a imagem da function no registry privado, e cria
+o repositório `dataplanes` no Gogs:
+
+```bash
+cd function && make TAG=v0.1.1        # docker build + crossplane xpkg build + push
+# sem `make` no Windows/Git Bash: rode os três passos do function/Makefile manualmente
+cd ..
+./scripts/11-push-dataplanes-repo.sh  # cria o repo "dataplanes" no Gogs e registra no ArgoCD
+```
+
+Provisionar um dataplane = criar uma pasta com `values.yaml` no repo `dataplanes`
+(veja [specs/002-golang-composition-pipeline/contracts/dataplane-instance-values.md](specs/002-golang-composition-pipeline/contracts/dataplane-instance-values.md)):
+
+```yaml
+# dataplanes/meu-dataplane/values.yaml
+spoke: spoke-01
+image: nginxdemos/hello
+replicas: 1
+config:
+  greeting: ola
+```
+
+```bash
+git -C ../dataplanes add meu-dataplane && git -C ../dataplanes commit -m "add meu-dataplane"
+git -C ../dataplanes push gogs main
+
+# o ApplicationSet gitops/apps/dataplanes-appset.yaml descobre a pasta e cria a Application
+kubectl --context k3d-hub -n argocd get application dataplane-meu-dataplane
+kubectl --context k3d-hub get advanceddataplane meu-dataplane
+kubectl --context k3d-spoke-01 -n dp-meu-dataplane get deploy,svc,cm
+```
+
+Remover a pasta remove o dataplane (a `Application` gerada é podada pelo ApplicationSet,
+o que cascateia a exclusão da claim e dos recursos no spoke).
+
+**Registry privado**: `https://registry.127-0-0-1.nip.io` (push) /
+`registry.registry.svc.cluster.local:5000` (pull, de dentro do cluster). O node do
+hub resolve esse hostname interno via `scripts/12-configure-hub-registry-mirror.sh`
+(mirror de containerd), já que `*.svc.cluster.local` só resolve dentro de pods, não
+no node.
 
 ### Acessar as UIs
 
@@ -115,13 +159,22 @@ Depois:
 ```
 bootstrap/gogs/          manifests do Gogs (aplicados uma vez fora do Argo; depois o Argo os "adota")
 gitops/root/              Application raiz (app of apps)
-gitops/apps/               Applications filhas: gogs, crossplane, providers, providerconfigs, compositions
+gitops/apps/               Applications filhas + o ApplicationSet "dataplanes"
+gitops/argocd/             Ingress/TLS do ArgoCD e Gogs, ClusterIssuers, config do Traefik
+registry/                 manifests do registry OCI privado (Deployment/Service/Ingress/Certificate)
+charts/dataplane-baseline/   XRD + Composition baseline (P&T), empacotado como Helm chart
+charts/dataplane-advanced/   XRD + Function + Composition avançada (pipeline), Helm chart
+charts/dataplane-instance/   chart minúsculo que renderiza 1 claim AdvancedDataPlane a partir de values.yaml
+function/                 código-fonte Go da Composition Function (function-sdk-go) + Dockerfile + Makefile
 crossplane/providers/     Provider (provider-kubernetes)
 crossplane/config/         ProviderConfig por spoke (aponta pro secret de kubeconfig)
-crossplane/compositions/  XRD + Composition de teste (XDataPlane / DataPlane)
-crossplane/examples/       Claims de exemplo para os dois spokes
+crossplane/examples/       Claims de exemplo da composition baseline para os dois spokes
 scripts/                  automação de todo o setup (numerados na ordem de execução)
+specs/002-golang-composition-pipeline/  spec/plan/tasks da composition avançada + registry + dataplanes repo
 ```
+
+Repositório `dataplanes` (Gogs, separado deste): uma pasta por dataplane avançado,
+cada uma com um `values.yaml` — ver seção acima.
 
 ## Teardown
 

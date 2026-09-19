@@ -16,9 +16,9 @@ described in `data-model.md`.
 
 ```text
 dataplanes/
-├── demo-01/
+├── adv-01/
 │   └── values.yaml
-├── demo-02/
+├── adv-02/
 │   └── values.yaml
 └── <your-dataplane-name>/
     └── values.yaml
@@ -33,8 +33,8 @@ replicas: <integer>        # optional — default 1, must be >= 1
 config: {}                 # optional — free-form key/value map rendered into the composed ConfigMap
 ```
 
-See `demo-01/values.yaml` and `demo-02/values.yaml` (pushed by
-`scripts/11-push-function-and-dataplanes-repos.sh`) for concrete, runnable examples
+See `adv-01/values.yaml` and `adv-02/values.yaml` (pushed by
+`scripts/11-push-dataplanes-repo.sh`) for concrete, runnable examples
 — one per existing spoke, mirroring feature 001's two example claims.
 
 ## Response shape (how to observe success)
