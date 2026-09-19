@@ -3,8 +3,16 @@ kind: Ingress
 metadata:
   name: gogs-ingress
   namespace: gogs
+  annotations:
+    cert-manager.io/cluster-issuer: "lab-ca-issuer"
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/router.entrypoints: "websecure"
 spec:
   ingressClassName: traefik
+  tls:
+    - hosts:
+        - git.127-0-0-1.nip.io
+      secretName: gogs-tls
   rules:
     - host: git.127-0-0-1.nip.io
       http:
