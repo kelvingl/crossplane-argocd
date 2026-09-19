@@ -1,14 +1,22 @@
 <!--
 Sync Impact Report
-- Version change: (none) → 1.0.0 (initial ratification)
-- Modified principles: n/a (first version)
-- Added sections: Core Principles (5), Technology Constraints, Development Workflow, Governance
+- Version change: 1.0.0 → 1.1.0
+- Modified principles: none redefined/removed (I-V unchanged)
+- Modified sections: Technology Constraints — Crossplane bullet expanded to
+  additionally permit Composition Functions (function-pipeline mode) for new,
+  advanced example Compositions, alongside the existing classic v1.x
+  Patch-and-Transform model (both now coexist; v2/namespaced-XR migration is
+  still a separate future amendment). Two new bullets added: private-registry
+  requirement for Composition Function images, and mandatory Helm packaging for
+  any Composition ArgoCD installs/upgrades.
+- Added sections: none (amendment lives inside existing Technology Constraints)
 - Removed sections: none
-- Templates requiring follow-up: none — plan/spec/tasks templates already reference
-  "Constitution Check" generically and need no structural change for this ratification.
-- Deferred placeholders: none. Values below were inferred from the existing repo
-  (README.md, gitops/, crossplane/, scripts/) since no explicit principles were
-  supplied in the conversation; review and amend if any inference misrepresents intent.
+- Templates requiring follow-up: none — plan/spec/tasks templates already
+  reference "Constitution Check" generically.
+- Deferred placeholders: none.
+- Rationale for MINOR bump: materially expands Technology Constraints guidance
+  (new permitted pattern + two new mandatory constraints) without removing or
+  redefining any existing non-negotiable principle (I-V untouched).
 -->
 
 # argo-crossplane Constitution
@@ -49,17 +57,20 @@ Child Applications MUST set `syncPolicy.automated.{prune,selfHeal}: true` and
 ### IV. Composable, Testable Compositions
 Every `CompositeResourceDefinition` added under `crossplane/compositions/` MUST ship
 with at least one `Composition` and at least one example claim under
-`crossplane/examples/` that has been applied against a real spoke and verified
-end-to-end (resources observed running in the target spoke namespace) before the
-feature is considered done. A Composition merged without a working example is
-incomplete work, not a stopping point.
+`crossplane/examples/` (or, for a Composition whose instances are declared via a
+dedicated instances repository per the Technology Constraints below, at least one
+real instance declared there) that has been applied against a real spoke and
+verified end-to-end (resources observed running in the target spoke namespace)
+before the feature is considered done. A Composition merged without a working
+example is incomplete work, not a stopping point.
 
 ### V. Secrets Never Committed
 Kubeconfigs, admin passwords, and tokens (spoke kubeconfigs, Gogs admin credentials,
-ArgoCD repository credentials) MUST be generated and stored out-of-band — under
-`.secrets/` (git-ignored) or as Kubernetes `Secret` objects created by scripts — and
-referenced from Git-tracked manifests only by name (`secretRef`). No YAML committed
-to this repository may contain a real credential, private key, or kubeconfig.
+ArgoCD repository credentials, private registry credentials) MUST be generated and
+stored out-of-band — under `.secrets/` (git-ignored) or as Kubernetes `Secret`
+objects created by scripts — and referenced from Git-tracked manifests only by name
+(`secretRef`). No YAML committed to this repository may contain a real credential,
+private key, or kubeconfig.
 
 ## Technology Constraints
 
@@ -67,18 +78,37 @@ to this repository may contain a real credential, private key, or kubeconfig.
   future spoke) MUST share one Docker network (`hublab`) so the hub can reach spoke
   API servers by container DNS name, and each spoke MUST be created with a
   `--tls-san` matching its own server container name.
-- Crossplane is pinned to the latest v1.x line (classic cluster-scoped Composition /
-  Patch-and-Transform via `spec.resources`), not v2's namespaced-XR / function-pipeline
-  model, so the hub-and-spoke pattern stays simple to read. Moving to v2 or to
-  Composition Functions is a deliberate, separate amendment, not an incidental
-  upgrade.
+- Crossplane's classic v1.x cluster-scoped Composition (Patch-and-Transform via
+  `spec.resources`) remains valid and MUST keep working for every Composition that
+  predates this amendment (e.g. `xdataplanes.lab.example.org` from feature
+  001-dataplane-provisioning). Crossplane Composition Functions (v1.x
+  function-pipeline mode, `spec.mode: Pipeline`) are additionally permitted for new,
+  more advanced example Compositions (e.g. feature 002-golang-composition-pipeline),
+  provided they still select the target spoke exclusively through
+  `providerConfigRef.name` per Principle II. Adopting Crossplane v2 (namespaced XRs)
+  remains a deliberate, separate future amendment, not authorized by this change.
+- Any Composition Function's container image MUST be published to, and pulled from,
+  a private OCI registry that itself runs in the hub and is provisioned through this
+  repository's GitOps automation (Principle I) — a Composition Function MUST NOT
+  depend on a public/external registry for normal cluster operation. Base or builder
+  images used only at build time (never pulled by the running cluster) are exempt.
+- Any Composition — classic or function-pipeline — that ArgoCD installs or upgrades
+  MUST be packaged and released as a Helm chart. A plain directory of manifests
+  (`directory.recurse`) is not a valid delivery mechanism for a Composition once this
+  amendment is in effect; a Composition Application predating this amendment MUST be
+  migrated to a Helm-based Application before or as part of the change that touches
+  it next.
 - `provider-kubernetes` is the only mechanism used to reach spokes from the hub.
   Introducing a different multi-cluster mechanism (e.g. Cluster API, a commercial
   Crossplane multi-cluster feature) requires amending this constitution first.
 - Gogs (not GitHub or another SaaS) is the git source ArgoCD reconciles from inside
   the cluster, so the lab keeps working without external network access once
   bootstrapped. A GitHub remote (`origin`) MAY additionally exist for human
-  collaboration/backup, but it is never what ArgoCD points at.
+  collaboration/backup, but it is never what ArgoCD points at. A Composition's
+  source code (when non-trivial, e.g. a Composition Function written in Go) and a
+  set of declared instances of a Composition (e.g. per-dataplane values) MAY each
+  live in their own dedicated Gogs repository, separate from the platform GitOps
+  repository, provided ArgoCD still reconciles from Gogs per Principle I.
 
 ## Development Workflow
 
@@ -105,4 +135,4 @@ SHOULD be run before `/speckit-implement` on any feature to confirm the plan and
 tasks stay compliant with the principles above; deviations must be justified in the
 feature's plan, not silently merged.
 
-**Version**: 1.0.0 | **Ratified**: 2026-09-18 | **Last Amended**: 2026-09-18
+**Version**: 1.1.0 | **Ratified**: 2026-09-18 | **Last Amended**: 2026-09-19
