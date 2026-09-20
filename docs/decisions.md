@@ -660,6 +660,50 @@ MiniStack).
 
 ---
 
+### ADR-027: spoke-01/spoke-02 registrados como Clusters no ArgoCD
+
+**Decisão**: criar um Secret por spoke no namespace `argocd`, com o label
+`argocd.argoproj.io/secret-type: cluster` (formato declarativo padrão do
+ArgoCD para registro de cluster), reaproveitando o mesmo kubeconfig
+(client-cert/key, server via IP de container, TLS não verificado) já gerado
+por `scripts/03-register-spokes.sh` para o `ProviderConfig` do
+`provider-kubernetes`. Script novo: `scripts/16-register-argocd-clusters.sh`,
+encadeado em `00-up.sh` logo após `06-install-argocd.sh`.
+
+**Contexto**: até então o ArgoCD só "enxergava" o próprio hub
+(`in-cluster`) — os spokes existiam como clusters k3d reais, mas eram
+conhecidos apenas pelo Crossplane, através dos `ProviderConfig`s. O operador
+pediu explicitamente que os dataplanes "fiquem registrados no argo como
+clusters".
+
+**Racional**: reaproveitar o kubeconfig já existente (em vez de gerar um
+novo Secret/ServiceAccount `argocd-manager` como o `argocd cluster add`
+faria) evita duplicar a superfície de credenciais dos spokes e mantém uma
+única fonte de geração (`03-register-spokes.sh`) para "como o hub fala com
+cada spoke". O `argocd` CLI foi descartado para essa tarefa porque exigiria
+um fluxo de `login` incompatível com o acesso anônimo configurado no
+ADR (ver seção "Rede, TLS e acesso às UIs"); o formato de Secret declarativo
+é a forma oficialmente documentada de registrar um cluster sem o CLI.
+
+**Escopo desta mudança**: só visibilidade/topologia. Nenhuma `Application`
+do ArgoCD passou a apontar `destination.server`/`destination.name` para um
+spoke — o provisionamento de recursos nos spokes continua 100% via
+Crossplane/`provider-kubernetes`, como nas features 001/002. Registrar o
+cluster no ArgoCD é o que faz `spoke-01`/`spoke-02` aparecerem em
+Settings > Clusters na UI e habilita, se algum dia for necessário, uma
+`Application` endereçada diretamente a um spoke — mas isso não foi pedido
+nem implementado aqui.
+
+**Secret não commitado**: como o Secret de kubeconfig do `provider-kubernetes`
+(Constitution Principle V), o Secret de cluster do ArgoCD é criado
+imperativamente pelo script, nunca versionado em Git.
+
+**Status**: Aceito. Verificado via `GET /api/v1/clusters` da API do ArgoCD
+(sem header de autenticação, graças ao acesso anônimo do ADR de rede),
+confirmando `spoke-01` e `spoke-02` listados ao lado do `in-cluster`.
+
+---
+
 ## Resumo de decisões superadas ou com incidente associado
 
 | ADR | O que mudou | Por quê |

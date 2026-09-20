@@ -9,6 +9,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")"
 ./04-bootstrap-gogs.sh
 ./05-push-to-gogs.sh
 ./06-install-argocd.sh
+./16-register-argocd-clusters.sh
 ./07-bootstrap-gitops.sh
 
 echo

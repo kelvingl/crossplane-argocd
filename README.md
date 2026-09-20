@@ -50,6 +50,7 @@ Rode os scripts em ordem (todos em `scripts/`, bash/Git Bash):
 ./scripts/04-bootstrap-gogs.sh     # sobe o Gogs no hub (fora do GitOps, "bootstrap")
 ./scripts/05-push-to-gogs.sh       # cria repo + usuário admin no Gogs e faz push deste repo
 ./scripts/06-install-argocd.sh     # instala o ArgoCD no hub
+./scripts/16-register-argocd-clusters.sh  # registra spoke-01/spoke-02 como Clusters no ArgoCD
 ./scripts/07-bootstrap-gitops.sh   # cria o Repository do Gogs no ArgoCD + a Application raiz (app of apps)
 ```
 
@@ -163,6 +164,13 @@ Depois acesse direto (ignore avisos de certificado auto-assinado/não confiável
 
 Credenciais:
 - ArgoCD: **sem login** — acesso anônimo habilitado com role `admin` (lab local, sem exposição externa; ver `scripts/06-install-argocd.sh`). Se preferir reativar o login, remova `users.anonymous.enabled` do `argocd-cm` e `policy.default` do `argocd-rbac-cm` — a senha inicial do admin continua disponível em `argocd-initial-admin-secret` (`kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d`).
+
+Em **Settings > Clusters** o ArgoCD mostra `spoke-01` e `spoke-02` como clusters
+registrados (além do `in-cluster`, que é o próprio hub) — ver
+`scripts/16-register-argocd-clusters.sh`. Isso é só visibilidade/topologia por
+enquanto: o provisionamento dos dataplanes continua sendo feito pelo Crossplane
+via `provider-kubernetes` (os `ProviderConfig`s em `crossplane/config/`), não por
+uma `Application` do ArgoCD endereçada diretamente a esses clusters.
 - Gogs: `gitadmin` / `ChangeMe123!`
 - MiniStack/StackPort: sem login (emulador local, credenciais AWS fake `test`/`test`)
 

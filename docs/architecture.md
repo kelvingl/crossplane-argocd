@@ -25,6 +25,16 @@ apontando para um `Secret` com o kubeconfig do spoke, criado fora do Git
 spoke alvo exclusivamente por `spec.parameters.spoke` → `providerConfigRef.name`,
 nunca por endpoint/credencial embutidos.
 
+Cada spoke também é registrado **no ArgoCD** como um Cluster (Secret com label
+`argocd.argoproj.io/secret-type: cluster` no namespace `argocd`, criado por
+`scripts/16-register-argocd-clusters.sh` a partir do mesmo kubeconfig usado
+pelo `ProviderConfig`). Isso faz `spoke-01`/`spoke-02` aparecerem em
+Settings > Clusters na UI do ArgoCD, ao lado do `in-cluster` (o próprio hub).
+Hoje isso é só visibilidade/topologia — nenhuma `Application` do ArgoCD tem
+`destination.server` apontando para um spoke; o provisionamento continua
+inteiramente via Crossplane/`provider-kubernetes`. Ver ADR-027 em
+`decisions.md`.
+
 ## Diagrama de componentes
 
 ```mermaid
