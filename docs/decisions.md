@@ -698,9 +698,69 @@ nem implementado aqui.
 (Constitution Principle V), o Secret de cluster do ArgoCD é criado
 imperativamente pelo script, nunca versionado em Git.
 
-**Status**: Aceito. Verificado via `GET /api/v1/clusters` da API do ArgoCD
+**Status**: Superado pelo ADR-028 — o mecanismo de registro (de onde vem a
+*lista* de spokes) mudou, mas o formato de Secret e a reutilização do
+kubeconfig descritos aqui continuam valendo. Verificado, na época, via
+`GET /api/v1/clusters` da API do ArgoCD
 (sem header de autenticação, graças ao acesso anônimo do ADR de rede),
 confirmando `spoke-01` e `spoke-02` listados ao lado do `in-cluster`.
+
+---
+
+### ADR-028: lista de clusters do ArgoCD passa a vir do repo `dataplanes`; Helm `lookup` descartado
+
+**Decisão**: mover a *lista* de quais spokes registrar como Cluster do
+ArgoCD para o repositório `dataplanes` — uma pasta `clusters/<spoke>/` por
+spoke (mesma convenção das pastas de instância de dataplane, só que dentro
+de `clusters/`), listada e aplicada por
+`scripts/16-register-argocd-clusters.sh`, que agora clona o repo `dataplanes`
+em vez de ter `spoke-01`/`spoke-02` hardcoded.
+
+**Contexto**: pedido do operador logo após o ADR-027: "altera pra criar os
+clusters no projeto de dataplanes no git". A primeira tentativa de
+implementação foi **totalmente declarativa**: um `ApplicationSet`
+(`dataplane-clusters`) lendo `clusters/*` do repo `dataplanes` via git
+directories generator, renderizando um chart novo (`charts/argocd-cluster`)
+que usava a função `lookup` do Helm para ler o kubeconfig do spoke *ao vivo*
+do Secret já existente em `crossplane-system` — eliminando completamente a
+necessidade de um script, e sem nenhuma credencial passando por `values.yaml`.
+
+**Por que foi revertido**: testado de ponta a ponta (não só lido na
+documentação do Helm) — o `ApplicationSet` gerou as duas `Application`s
+corretamente, mas ambas ficaram com `sync: Unknown` e a mensagem de erro do
+repo-server mostrava exatamente o comando executado:
+`helm template . --name-template cluster-spoke-01 ... --include-crds`. O
+repo-server do ArgoCD invoca o binário `helm template` para gerar manifests
+de forma determinística/cacheável — e `helm template` (diferente de
+`helm install`/`upgrade`) roda sem contexto de cluster, então `lookup`
+sempre retorna um mapa vazio ali, mesmo com o Secret
+`crossplane-system/spoke-01-kubeconfig` realmente existindo (confirmado com
+`kubectl get secret` em paralelo, para descartar erro de digitação/RBAC). O
+chart falhava com `fail(...)` no próprio template, de forma limpa, mas
+continuava sendo um beco sem saída estrutural — não um bug de configuração
+corrigível. `charts/argocd-cluster/` e o `ApplicationSet` foram removidos.
+
+**Racional da correção**: como a criação do Secret de credenciais precisa
+continuar imperativa de qualquer forma (Constitution Principle V — Secrets
+Never Committed — nenhuma credencial pode ir para o `values.yaml` de um
+chart em git), o único ganho real de "estar no Git" que ainda fazia sentido
+buscar era a **lista de quais spokes registrar**, não o mecanismo de
+aplicação. `scripts/16-register-argocd-clusters.sh` passou a clonar
+`dataplanes.git` (mesmas credenciais/porta usadas por
+`scripts/11-push-dataplanes-repo.sh`) e enumerar `clusters/*/` em vez de ter
+os nomes dos spokes no próprio script — a fonte de verdade de "quais
+clusters existem" ficou no Git, igual à fonte de verdade de "quais
+dataplanes existem".
+
+**Consequência prática**: o script deixou de ser encadeado em `00-up.sh`
+(precisa que `scripts/11-push-dataplanes-repo.sh` já tenha criado o repo
+`dataplanes` no Gogs) e passou a ser um passo manual documentado no
+`README.md`, na mesma seção da composition avançada, logo depois do script
+11.
+
+**Status**: Aceito, verificado de ponta a ponta (Secrets `cluster-spoke-01`/
+`cluster-spoke-02` recriados corretamente a partir do conteúdo do repo
+`dataplanes`, confirmados via `GET /api/v1/clusters`).
 
 ---
 
@@ -715,3 +775,5 @@ confirmando `spoke-01` e `spoke-02` listados ao lado do `in-cluster`.
 | ADR-023 | Reinício isolado do Redis → compressão desabilitada | Divergência de cache entre componentes do ArgoCD |
 | ADR-024 | `charts/`+`function/` soltos → `compositions/<name>/` | Falta de convenção para novas Compositions |
 | ADR-025 | Floci + `floci-ui` → substituídos (ADR-026) | Pedido explícito do operador, sem defeito técnico |
+| ADR-027 | Registro de clusters no ArgoCD: lista hardcoded → repo `dataplanes` (ADR-028) | Pedido explícito do operador |
+| ADR-028 | `ApplicationSet`+Helm `lookup` descartado → script clonando o repo | `helm template` do repo-server do ArgoCD não tem acesso ao cluster |

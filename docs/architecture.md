@@ -26,14 +26,24 @@ spoke alvo exclusivamente por `spec.parameters.spoke` → `providerConfigRef.nam
 nunca por endpoint/credencial embutidos.
 
 Cada spoke também é registrado **no ArgoCD** como um Cluster (Secret com label
-`argocd.argoproj.io/secret-type: cluster` no namespace `argocd`, criado por
-`scripts/16-register-argocd-clusters.sh` a partir do mesmo kubeconfig usado
-pelo `ProviderConfig`). Isso faz `spoke-01`/`spoke-02` aparecerem em
-Settings > Clusters na UI do ArgoCD, ao lado do `in-cluster` (o próprio hub).
-Hoje isso é só visibilidade/topologia — nenhuma `Application` do ArgoCD tem
+`argocd.argoproj.io/secret-type: cluster` no namespace `argocd`). A *lista* de
+quais spokes registrar vem do Git — uma pasta `clusters/<spoke>/` no
+repositório `dataplanes`, mesma convenção das pastas de instância — mas a
+criação do Secret com as credenciais em si é imperativa,
+`scripts/16-register-argocd-clusters.sh`, que clona o repo `dataplanes`, lê
+`clusters/`, e reaproveita o mesmo kubeconfig usado pelo `ProviderConfig`.
+Isso faz `spoke-01`/`spoke-02` aparecerem em Settings > Clusters na UI do
+ArgoCD, ao lado do `in-cluster` (o próprio hub). Hoje isso é só
+visibilidade/topologia — nenhuma `Application` do ArgoCD tem
 `destination.server` apontando para um spoke; o provisionamento continua
-inteiramente via Crossplane/`provider-kubernetes`. Ver ADR-027 em
-`decisions.md`.
+inteiramente via Crossplane/`provider-kubernetes`.
+
+Uma primeira versão tentou fazer isso 100% declarativo, via `ApplicationSet` +
+chart Helm usando a função `lookup` para ler o kubeconfig do spoke ao vivo do
+Secret já existente — sem nenhum script. Não funcionou: o repo-server do
+ArgoCD roda `helm template` sem acesso ao cluster, então `lookup` sempre
+retorna vazio ali. Ver ADR-027/ADR-028 em `decisions.md` para os dois
+desenhos e por que o segundo foi necessário.
 
 ## Diagrama de componentes
 

@@ -1,8 +1,0 @@
-# spoke: nome do spoke a registrar como Cluster no ArgoCD (ex.: spoke-01).
-# Deve bater com um Secret "<spoke>-kubeconfig" já existente no namespace
-# crossplane-system (criado por scripts/03-register-spokes.sh) — este chart
-# nunca recebe credenciais via values, só lê o que já está no cluster.
-spoke: ""
-
-# namespace onde o Secret "<spoke>-kubeconfig" foi criado.
-kubeconfigNamespace: crossplane-system

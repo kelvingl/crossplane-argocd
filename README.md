@@ -86,6 +86,8 @@ make release-dataplane-advanced       # build (docker + xpkg) + push da imagem d
 # sem `make` no Windows/Git Bash: rode os passos de
 # compositions/dataplane-advanced/function/Makefile manualmente
 ./scripts/11-push-dataplanes-repo.sh  # cria o repo "dataplanes" no Gogs e registra no ArgoCD
+./scripts/16-register-argocd-clusters.sh  # registra no ArgoCD (Settings > Clusters) cada spoke
+                                           # declarado em clusters/<spoke>/ no repo dataplanes
 ```
 
 Provisionar um dataplane = criar uma pasta com `values.yaml` no repo `dataplanes`
@@ -165,14 +167,17 @@ Credenciais:
 - ArgoCD: **sem login** — acesso anônimo habilitado com role `admin` (lab local, sem exposição externa; ver `scripts/06-install-argocd.sh`). Se preferir reativar o login, remova `users.anonymous.enabled` do `argocd-cm` e `policy.default` do `argocd-rbac-cm` — a senha inicial do admin continua disponível em `argocd-initial-admin-secret` (`kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d`).
 
 Em **Settings > Clusters** o ArgoCD mostra `spoke-01` e `spoke-02` como clusters
-registrados (além do `in-cluster`, que é o próprio hub). Esse registro é
-GitOps: declarado em `clusters/<spoke>/values.yaml` no repositório `dataplanes`
-e aplicado pelo `ApplicationSet` `dataplane-clusters`
-(`gitops/apps/dataplane-clusters-appset.yaml`), que renderiza o chart
-`charts/argocd-cluster` — o chart nunca recebe credenciais via Git, ele lê o
-kubeconfig do spoke direto do Secret que `scripts/03-register-spokes.sh` já
-cria em `crossplane-system` (Helm `lookup`). Isso é só visibilidade/topologia
-por enquanto: o provisionamento dos dataplanes continua sendo feito pelo
+registrados (além do `in-cluster`, que é o próprio hub). A **lista** de quais
+spokes registrar vem do Git — uma pasta `clusters/<spoke>/` no repositório
+`dataplanes` — mas a criação do Secret de credenciais em si continua
+imperativa, via `scripts/16-register-argocd-clusters.sh` (que clona o repo
+`dataplanes`, lê `clusters/`, e usa o mesmo kubeconfig que
+`scripts/03-register-spokes.sh` já gera). Tentamos primeiro um
+`ApplicationSet`/chart Helm com `lookup` lendo o kubeconfig ao vivo — o
+repo-server do ArgoCD roda `helm template` sem acesso ao cluster, então
+`lookup` sempre retorna vazio ali, mesmo com o Secret existindo; documentado
+como ADR-028 em `docs/decisions.md`. Isso é só visibilidade/topologia por
+enquanto: o provisionamento dos dataplanes continua sendo feito pelo
 Crossplane via `provider-kubernetes` (os `ProviderConfig`s em
 `crossplane/config/`), não por uma `Application` do ArgoCD endereçada
 diretamente a esses clusters.
@@ -201,9 +206,8 @@ Depois:
 ```
 bootstrap/gogs/          manifests do Gogs (aplicados uma vez fora do Argo; depois o Argo os "adota")
 gitops/root/              Application raiz (app of apps)
-gitops/apps/               Applications filhas + os ApplicationSets "dataplanes" e "dataplane-clusters"
+gitops/apps/               Applications filhas + o ApplicationSet "dataplanes"
 gitops/argocd/             Ingress/TLS do ArgoCD e Gogs, ClusterIssuers, config do Traefik
-charts/argocd-cluster/    chart usado pelo ApplicationSet "dataplane-clusters" (registra um spoke como Cluster no ArgoCD via Helm lookup)
 registry/                 manifests do registry OCI privado (Deployment/Service/Ingress/Certificate)
 ministack/                manifests do MiniStack + StackPort UI (emulador local de AWS)
 compositions/              uma pasta por Composition, cada uma com seu próprio Makefile (dev/build/push/test)
