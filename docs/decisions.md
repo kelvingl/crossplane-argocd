@@ -764,6 +764,83 @@ dataplanes existem".
 
 ---
 
+### ADR-029: repositório `dataplanes` reestruturado em torno de um arquivo por cluster
+
+**Decisão**: substituir a estrutura de "uma pasta por instância de dataplane
+avançado" (`adv-01/values.yaml`, `adv-03/values.yaml`) e a pasta `clusters/`
+separada (ADR-027/028) por **um arquivo por spoke**,
+`dataplanes/<spoke>.yaml`, que declara tanto o registro do cluster no ArgoCD
+quanto tudo que roda nele — `charts:` (Helm charts aplicados direto no
+cluster do spoke) e `compositions:` (claims de Composition, aplicadas no
+hub). Dois catálogos novos, também no repo `dataplanes`: `charts/<nome>/`
+(fontes de chart de verdade) e `compositions/<nome>/` (documentação do
+contrato de values de cada Composition — o código-fonte da Composition em si
+continua só no repo `platform`).
+
+**Contexto**: pedido explícito do operador — "quero que os dataplanes dentro
+do repositorio de dataplanes tenham um arquivo de definição do dataplane
+(cluster) - que deve ter todos os charts/compositions que vão ser aplicados
+no cluster", com a terminologia explicitada: spoke = cluster = dataplane;
+control-plane = hub. Motivação real: até aqui, "o que roda num spoke" só
+podia ser uma claim de Composition (via Crossplane) — não existia um jeito
+de o ArgoCD aplicar um chart Helm comum *diretamente* num spoke, mesmo os
+spokes já estando registrados como Clusters do ArgoCD desde o ADR-027.
+
+**Desenho novo**: o `ApplicationSet` `dataplanes` trocou o gerador git
+`directories` (`path: "*"`) por `files` (`dataplanes/*.yaml`). Cada arquivo
+vira uma Application "wrapper" (`dataplane-<spoke>`) que renderiza um chart
+novo, `charts/dataplane-cluster` (repo `platform`) — esse chart faz `range`
+sobre `.Values.charts`/`.Values.compositions` e emite, para cada entrada,
+**uma Application filha própria**: `destination.name: <spoke>` para charts
+(direto no cluster do spoke, sem Crossplane — só possível por causa do
+ADR-027) e `destination.server` = hub para compositions (via o instance-chart
+já existente, `spoke` injetado automaticamente). É o mesmo padrão
+"Application gerando Application" que o `root-app-of-apps` já usava, agora
+parametrizado por dados do Git em vez de arquivos fixos.
+`scripts/16-register-argocd-clusters.sh` passou a ler o campo `cluster:`
+desses mesmos arquivos em vez da pasta `clusters/` separada — um arquivo
+único faz as duas coisas.
+
+**Dois erros reais pegos ao testar de ponta a ponta (não hipotéticos)**:
+
+1. **YAML inválido por `{{ }}` não citado**: a primeira versão tentou
+   reconstruir `charts`/`compositions` dentro de `valuesObject` usando Go
+   template + `toJson` (`charts: {{.charts | toJson}}`, sem aspas). Como
+   essa é uma string de valor YAML começando com `{`, o parser YAML tentou
+   interpretá-la como um *flow mapping* antes de qualquer templating rodar —
+   quebrando o `root-app-of-apps` inteiro (`error converting YAML to JSON:
+   yaml: invalid map key`), não só a `ApplicationSet` nova. Corrigido
+   abandonando a reconstrução via `toJson` e voltando ao padrão já usado
+   pela versão antiga desta mesma `ApplicationSet`: `helm.valueFiles`
+   apontando direto para o arquivo do spoke via uma segunda fonte
+   (`ref: values`) — sem reconstrução nenhuma, o arquivo já tem exatamente o
+   formato que `charts/dataplane-cluster/values.yaml` espera.
+2. **Parâmetro errado do gerador `files` para o nome do arquivo**: o
+   primeiro `valueFiles: [$values/dataplanes/{{path.basename}}]` resolveu
+   para `dataplanes/dataplanes` (`path.basename` é o nome do **diretório**
+   que contém o arquivo casado, não do arquivo em si) — corrigido para
+   `{{path}}/{{path.filename}}`.
+
+**Armadilha de cache reconhecida, não nova**: depois do primeiro push da
+`ApplicationSet` nova, o controller continuou gerando Applications a partir
+do generator **antigo** (`directories`, `path: "*"`) — como os nomes de
+pasta de topo agora eram `charts`/`compositions`/`dataplanes` (as pastas
+novas!), isso gerou de verdade `dataplane-charts`/`dataplane-compositions`/
+`dataplane-dataplanes`, cada uma tentando renderizar o instance-chart antigo
+com um `values.yaml` inexistente. Só resolveu depois de reiniciar Redis +
+repo-server + applicationset-controller, na ordem já documentada no
+ADR-023/`docs/gitops-workflow.md`.
+
+**Status**: Aceito, verificado de ponta a ponta: `dataplane-spoke-01`/
+`dataplane-spoke-02` e as quatro Applications filhas (`dataplane-spoke-01-hello`,
+`dataplane-spoke-01-adv-01`, `dataplane-spoke-02-adv-03`) todas `Synced`/
+`Healthy`; `spoke-01-hello` confirmado rodando 1/1 direto no spoke-01 (sem
+Crossplane, via `docker exec ... kubectl get deploy`); os dois claims
+`AdvancedDataPlane` confirmados `Ready` e seus recursos compostos
+confirmados existindo nos spokes corretos.
+
+---
+
 ## Resumo de decisões superadas ou com incidente associado
 
 | ADR | O que mudou | Por quê |
@@ -777,3 +854,4 @@ dataplanes existem".
 | ADR-025 | Floci + `floci-ui` → substituídos (ADR-026) | Pedido explícito do operador, sem defeito técnico |
 | ADR-027 | Registro de clusters no ArgoCD: lista hardcoded → repo `dataplanes` (ADR-028) | Pedido explícito do operador |
 | ADR-028 | `ApplicationSet`+Helm `lookup` descartado → script clonando o repo | `helm template` do repo-server do ArgoCD não tem acesso ao cluster |
+| ADR-029 | Pasta-por-instância + `clusters/` → um arquivo `dataplanes/<spoke>.yaml` | Pedido explícito do operador (charts + compositions por cluster) |

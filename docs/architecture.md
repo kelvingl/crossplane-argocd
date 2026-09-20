@@ -4,7 +4,7 @@ Este documento descreve a topologia atual do lab: os três clusters k3d, a árvo
 app-of-apps do ArgoCD, o papel do Crossplane no modelo hub-and-spoke, o Gogs como
 única fonte GitOps, o registry OCI privado e o emulador de AWS (MiniStack). Tudo aqui
 reflete o estado real dos manifests em `gitops/`, `crossplane/`, `compositions/`,
-`registry/` e `ministack/` — não um design aspiracional.
+`charts/`, `registry/` e `ministack/` — não um design aspiracional.
 
 ## Visão geral: 3 clusters, 1 rede Docker
 
@@ -15,9 +15,12 @@ hub, spoke-01, spoke-02 — três clusters k3d na mesma rede Docker "hublab"
 - **`hub`**: o único cluster que roda ArgoCD, Gogs e o control plane do Crossplane
   (core + providers). É o único ponto de controle da plataforma (Constitution
   Principle II — Hub-and-Spoke Isolation).
-- **`spoke-01` / `spoke-02`**: não rodam nenhuma ferramenta de plataforma. Apenas
-  recebem recursos provisionados a partir do hub via `provider-kubernetes`
-  (`kubernetes.crossplane.io/v1alpha2` `Object`).
+- **`spoke-01` / `spoke-02`**: não rodam nenhuma ferramenta de plataforma. Recebem
+  recursos de duas formas: (a) provisionados a partir do hub via
+  `provider-kubernetes` (`kubernetes.crossplane.io/v1alpha2` `Object`), como
+  efeito colateral de uma claim de Composition; ou (b) charts Helm aplicados
+  **diretamente** pelo ArgoCD, agora que cada spoke é um Cluster registrado no
+  ArgoCD — sem Crossplane no meio. Ver "`dataplanes/<spoke>.yaml`" abaixo.
 
 Cada spoke é registrado no hub como um `ProviderConfig` (`crossplane/config/`)
 apontando para um `Secret` com o kubeconfig do spoke, criado fora do Git
@@ -27,23 +30,55 @@ nunca por endpoint/credencial embutidos.
 
 Cada spoke também é registrado **no ArgoCD** como um Cluster (Secret com label
 `argocd.argoproj.io/secret-type: cluster` no namespace `argocd`). A *lista* de
-quais spokes registrar vem do Git — uma pasta `clusters/<spoke>/` no
-repositório `dataplanes`, mesma convenção das pastas de instância — mas a
-criação do Secret com as credenciais em si é imperativa,
-`scripts/16-register-argocd-clusters.sh`, que clona o repo `dataplanes`, lê
-`clusters/`, e reaproveita o mesmo kubeconfig usado pelo `ProviderConfig`.
-Isso faz `spoke-01`/`spoke-02` aparecerem em Settings > Clusters na UI do
-ArgoCD, ao lado do `in-cluster` (o próprio hub). Hoje isso é só
-visibilidade/topologia — nenhuma `Application` do ArgoCD tem
-`destination.server` apontando para um spoke; o provisionamento continua
-inteiramente via Crossplane/`provider-kubernetes`.
+quais spokes registrar vem do Git — o campo `cluster:` de cada
+`dataplanes/<spoke>.yaml` no repositório `dataplanes` (mesmo arquivo que lista
+o que roda naquele cluster, ver seção seguinte) — mas a criação do Secret com
+as credenciais em si é imperativa, `scripts/16-register-argocd-clusters.sh`,
+que clona o repo `dataplanes` e reaproveita o mesmo kubeconfig usado pelo
+`ProviderConfig`. Isso faz `spoke-01`/`spoke-02` aparecerem em Settings >
+Clusters na UI do ArgoCD, ao lado do `in-cluster` (o próprio hub) — e é o que
+torna possível endereçar uma `Application` direto a um spoke
+(`destination.name: spoke-01`), usado pelas entradas `charts:` descritas
+abaixo.
 
-Uma primeira versão tentou fazer isso 100% declarativo, via `ApplicationSet` +
-chart Helm usando a função `lookup` para ler o kubeconfig do spoke ao vivo do
-Secret já existente — sem nenhum script. Não funcionou: o repo-server do
-ArgoCD roda `helm template` sem acesso ao cluster, então `lookup` sempre
-retorna vazio ali. Ver ADR-027/ADR-028 em `decisions.md` para os dois
-desenhos e por que o segundo foi necessário.
+Duas versões anteriores foram tentadas e descartadas antes desta: uma 100%
+declarativa via `ApplicationSet` + chart Helm com a função `lookup` (não
+funciona — o repo-server do ArgoCD roda `helm template` sem acesso ao
+cluster) e uma imperativa com lista de spokes hardcoded no script (perdeu a
+propriedade de "a lista vem do Git"). Ver ADR-027/028/029 em `decisions.md`.
+
+## `dataplanes/<spoke>.yaml`: o que roda em cada cluster
+
+Terminologia: **spoke = cluster = dataplane** — o mesmo cluster k3d, três
+nomes pelo mesmo motivo em contextos diferentes; **control-plane = hub**.
+
+Cada spoke tem exatamente um arquivo, `dataplanes/<spoke>.yaml` no
+repositório `dataplanes`, listando tudo que roda nele:
+
+```yaml
+cluster: spoke-01
+charts:                    # Helm charts aplicados DIRETO no cluster do spoke
+  - name: hello
+    chart: charts/hello     # caminho, no repo dataplanes, até o chart
+    values: { replicas: 1 }
+compositions:               # claims de Composition, aplicadas no HUB
+  - name: adv-01
+    composition: dataplane-advanced   # ver compositions/<nome>/README.md
+    values: { image: nginxdemos/hello, replicas: 1, config: { greeting: hello-from-adv-01 } }
+```
+
+O `ApplicationSet` `dataplanes` (`gitops/apps/dataplanes-appset.yaml`, no
+repo `platform`) usa um gerador git `files` sobre `dataplanes/*.yaml` — um
+arquivo, uma Application "wrapper" `dataplane-<spoke>`, que renderiza o chart
+`charts/dataplane-cluster` (também no repo `platform`). Esse chart faz o
+fan-out: para cada entrada de `charts`, emite uma `Application` filha com
+`destination.name: <spoke>` (direto no cluster, sem Crossplane); para cada
+entrada de `compositions`, emite uma `Application` filha com
+`destination.server` = hub, via o instance-chart daquela Composition, com
+`spoke` injetado automaticamente. Ver `docs/gitops-workflow.md` para o fluxo
+completo e ADR-029 em `decisions.md` para os erros reais de templating
+encontrados na migração (YAML quebrado por `{{ }}` não citado; parâmetro
+errado do gerador `files` para o nome do arquivo).
 
 ## Diagrama de componentes
 
@@ -78,12 +113,12 @@ flowchart TB
 
     Origin[("GitHub origin\n(backup/colaboração humana)")]
     DevLocal["Checkout local do operador"]
-    DPRepo["Gogs: repo dataplanes\n(1 pasta por instância)"]
+    DPRepo["Gogs: repo dataplanes\n(1 arquivo por cluster)"]
 
     DevLocal -->|push| Gogs
     DevLocal -->|push opcional| Origin
     DevLocal -->|push| DPRepo
-    ArgoCD -->|ApplicationSet git-generator\ndirectories| DPRepo
+    ArgoCD -->|ApplicationSet git-generator\nfiles| DPRepo
 ```
 
 Observação: o diagrama mostra apenas o que existe hoje nos manifests
@@ -113,7 +148,7 @@ Filhas atuais, por `sync-wave` (menor primeiro):
 | `"1"` | `crossplane-compositions-s3` | `compositions/s3-bucket/chart` (helm) | `crossplane-system` |
 | `"2"` | `crossplane-config` | `crossplane/config` (directory) | `crossplane-system` |
 | `"2"` | `argocd-networking` | `gitops/argocd` (directory) | `argocd` |
-| `"2"` | `dataplanes` (ApplicationSet) | git generator `directories` sobre o repo `dataplanes` | `default` (por Application gerada) |
+| `"2"` | `dataplanes` (ApplicationSet) | git generator `files` (`dataplanes/*.yaml`) sobre o repo `dataplanes` | `argocd` (wrapper); filhas variam — spoke ou hub |
 
 **Por que essa ordem:** Crossplane core precisa existir antes de qualquer
 `Provider`/`ProviderConfig`/`Composition` que o referencie (wave 0 → 1); o
@@ -162,9 +197,11 @@ Há dois repositórios Gogs relevantes:
 - **`platform`** (este repositório) — tudo que ArgoCD instala diretamente:
   charts das Compositions, manifests do registry/MiniStack, Applications,
   ApplicationSet.
-- **`dataplanes`** — repositório separado, só com uma pasta por instância de
-  dataplane avançado (`values.yaml` cada). É consumido pelo `ApplicationSet`
-  via git generator `directories`.
+- **`dataplanes`** — repositório separado: um arquivo `dataplanes/<spoke>.yaml`
+  por cluster (charts + composition claims daquele spoke), mais os catálogos
+  `charts/` (charts Helm aplicados direto num spoke) e `compositions/`
+  (documentação do contrato de values de cada Composition instalada no hub).
+  É consumido pelo `ApplicationSet` via git generator `files`.
 
 O código-fonte da Composition Function (Go) **não** vive em um terceiro
 repositório dedicado — a ideia original (feature 002, ver `research.md`) era

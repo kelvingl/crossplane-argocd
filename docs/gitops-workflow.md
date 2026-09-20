@@ -55,48 +55,95 @@ ProviderConfigs/Compositions que os referenciam.
 
 ## O padrão `ApplicationSet` para o repo `dataplanes`
 
-`gitops/apps/dataplanes-appset.yaml` usa o gerador git `directories`
-apontando para o repositório Gogs `dataplanes` (`path: "*"` — todo diretório
-de topo vira uma entrada). Para cada diretório encontrado, o template gera
-uma `Application` `dataplane-<nome-do-diretório>` **multi-source**:
+Terminologia: spoke = cluster = dataplane; control-plane = hub.
+
+`gitops/apps/dataplanes-appset.yaml` usa o gerador git `files` apontando para
+`dataplanes/*.yaml` no repositório Gogs `dataplanes` — **um arquivo por
+cluster**, não mais uma pasta por instância. Cada `dataplanes/<spoke>.yaml`
+lista dois tipos de coisa para aquele cluster:
+
+```yaml
+cluster: spoke-01
+charts:            # Helm charts aplicados DIRETO no spoke
+  - name: hello
+    chart: charts/hello
+    values: { replicas: 1 }
+compositions:      # claims de Composition, aplicadas no hub
+  - name: adv-01
+    composition: dataplane-advanced
+    values: { image: nginxdemos/hello, replicas: 1, config: { greeting: hello-from-adv-01 } }
+```
+
+Para cada arquivo, o `ApplicationSet` gera **uma Application "wrapper"**
+(`dataplane-<spoke>`) **multi-source**:
 
 1. **fonte 1** — este repositório (`platform`), caminho
-   `compositions/dataplane-advanced/instance-chart` (o chart minúsculo que
-   renderiza um único claim `AdvancedDataPlane`), com
-   `helm.valueFiles: [$values/<diretório>/values.yaml]`.
-2. **fonte 2** — o repositório `dataplanes`, referenciado só como `ref: values`
-   (não é renderizado como chart, só fornece o `values.yaml` que a fonte 1
-   consome).
+   `charts/dataplane-cluster` (o chart que faz o fan-out — ver abaixo), com
+   `helm.valueFiles: [$values/dataplanes/<spoke>.yaml]` — o próprio arquivo
+   do spoke, lido como values do chart (seus campos batem 1:1 com
+   `charts/dataplane-cluster/values.yaml`).
+2. **fonte 2** — o repositório `dataplanes`, referenciado só como `ref: values`.
 
-**Fluxo ponta a ponta para provisionar um dataplane avançado**:
+Essa Application wrapper não cria recursos de workload diretamente: seu
+único papel é `range` sobre `.Values.charts` e `.Values.compositions` e
+emitir, para cada entrada, **uma Application filha própria**
+(`dataplane-<spoke>-<nome>`) — o mesmo padrão de "Application gerando
+Application" que já existia no `root-app-of-apps`, só que agora
+parametrizado por dados vindos do Git em vez de arquivos fixos:
+
+- entradas de **`charts`**: `destination.name: <spoke>` — endereça o
+  Cluster do ArgoCD registrado por `scripts/16-register-argocd-clusters.sh`
+  diretamente, sem Crossplane no meio. Fonte: o próprio repo `dataplanes`,
+  caminho da entrada (`charts/<nome>`).
+- entradas de **`compositions`**: `destination.server` é sempre o hub — o
+  Crossplane só roda lá. Fonte: este repositório (`platform`), resolvida a
+  partir do nome da composition via um mapa fixo em
+  `charts/dataplane-cluster/templates/_helpers.tpl` (hoje só
+  `dataplane-advanced` → `compositions/dataplane-advanced/instance-chart`).
+  O parâmetro `spoke` é injetado automaticamente a partir de `cluster:`.
+
+**Fluxo ponta a ponta para provisionar algo num spoke**:
 
 ```
-1. Criar uma pasta em ../dataplanes/<nome>/values.yaml
-   (spoke, image, replicas, config — ver
-   specs/002-golang-composition-pipeline/contracts/dataplane-instance-values.md)
+1. Editar/criar dataplanes/<spoke>.yaml — adicionar uma entrada em
+   "charts" (chart direto no cluster) ou "compositions" (claim no hub)
 2. git add / commit / push para o remote "gogs" do repo dataplanes
-   (scripts/11-push-dataplanes-repo.sh cuida da criação do repo + registro
-   do Repository Secret no ArgoCD, na primeira vez)
-3. O ApplicationSet detecta o novo diretório (git generator "directories")
-   e cria a Application "dataplane-<nome>"
-4. Essa Application renderiza um claim AdvancedDataPlane via instance-chart
-5. A Composition avançada (função Go) compõe Namespace+ConfigMap+
-   Deployment+Service como Objects do provider-kubernetes
-6. provider-kubernetes aplica esses Objects no spoke indicado em
-   values.yaml (spoke: spoke-01|spoke-02)
+   (scripts/11-push-dataplanes-repo.sh cuida da criação do repo, e
+   scripts/16-register-argocd-clusters.sh registra o spoke como Cluster
+   no ArgoCD, na primeira vez que aparece)
+3. O ApplicationSet detecta o arquivo (git generator "files") e
+   (re)sincroniza a Application "dataplane-<spoke>"
+4. Essa Application renderiza charts/dataplane-cluster, que emite uma
+   Application filha por entrada de charts/compositions
+5a. Application filha de "charts": Helm chart aplicado direto no spoke
+    (destination.name), sem Crossplane
+5b. Application filha de "compositions": renderiza um claim (ex.:
+    AdvancedDataPlane) no hub; a Composition (função Go) compõe os
+    recursos reais como Objects do provider-kubernetes; provider-kubernetes
+    aplica esses Objects no spoke indicado em "cluster:"
 ```
 
-**Remover** a pasta remove o dataplane: o `ApplicationSet` poda a
-`Application` gerada, o que cascateia a exclusão do claim e, por sua vez, dos
-recursos compostos no spoke — sem tocar em nenhum arquivo compartilhado
-(chart, `ApplicationSet`), verificado durante a US3 da feature 002
-(adicionar `adv-03`, remover `adv-02`, `adv-01`/`adv-03` permanecem intactos).
+**Remover** uma entrada de `charts`/`compositions` remove só aquilo: a
+Application filha correspondente é podada, cascateando a exclusão do
+claim/recursos. Remover o arquivo `dataplanes/<spoke>.yaml` inteiro remove
+tudo que aquele cluster tinha declarado (a Application wrapper e todas as
+filhas). Verificado de ponta a ponta na migração da estrutura antiga
+(uma pasta por instância `adv-01`/`adv-03`) para esta — ver ADR-029 em
+`docs/decisions.md`, incluindo dois erros reais de templating pegos no
+processo (YAML inválido por `{{ }}` não citado, e o parâmetro errado do
+gerador `files` para o nome do arquivo).
 
 **Armadilha conhecida (não um bug, um comportamento a saber destravar)**: os
 caches em camada do ArgoCD (Redis + cache de listagem git do
 `argocd-repo-server`) podem sobreviver ao requeue de 3 minutos do controller
-do `ApplicationSet`, atrasando a detecção de um diretório novo/renomeado/
-removido. Se isso acontecer:
+do `ApplicationSet`, atrasando a detecção de um arquivo/diretório novo,
+renomeado ou removido — ou pior, fazendo o `ApplicationSet` continuar
+gerando `Application`s a partir de um **generator/template antigo**, mesmo
+depois de um `git push` com a definição nova (foi exatamente isso que
+aconteceu na migração para `dataplanes/*.yaml`: mesmo com o arquivo já
+corrigido no Git, o controller continuou usando o generator `directories`
+antigo até Redis + repo-server + applicationset-controller serem
+reiniciados). Se isso acontecer:
 
 ```bash
 kubectl --context k3d-hub -n argocd rollout restart deployment/argocd-redis
