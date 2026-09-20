@@ -27,7 +27,7 @@ spec:
           helm:
             releaseName: "dataplane-{{cluster}}"
             valueFiles:
-              - $values/dataplanes/{{path.basename}}
+              - $values/{{path}}/{{path.filename}}
         - repoURL: http://gogs.gogs.svc.cluster.local:3000/gitadmin/dataplanes.git
           targetRevision: main
           ref: values
