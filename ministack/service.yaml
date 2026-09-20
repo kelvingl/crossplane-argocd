@@ -1,11 +1,11 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: floci
-  namespace: floci
+  name: ministack
+  namespace: ministack
 spec:
   selector:
-    app: floci
+    app: ministack
   ports:
     - port: 4566
       targetPort: 4566

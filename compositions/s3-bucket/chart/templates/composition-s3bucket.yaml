@@ -1,12 +1,12 @@
-# Provisiona um bucket S3 no Floci (emulador local de AWS) via
-# provider-aws-s3, usando o ProviderConfig "floci"
-# (crossplane/config/providerconfig-floci.yaml).
+# Provisiona um bucket S3 no MiniStack (emulador local de AWS) via
+# provider-aws-s3, usando o ProviderConfig "ministack"
+# (crossplane/config/providerconfig-ministack.yaml).
 apiVersion: apiextensions.crossplane.io/v1
 kind: Composition
 metadata:
   name: xs3buckets.lab.example.org
   labels:
-    lab.example.org/provider: aws-s3-floci
+    lab.example.org/provider: aws-s3-ministack
 spec:
   compositeTypeRef:
     apiVersion: lab.example.org/v1alpha1
@@ -20,7 +20,7 @@ spec:
           forProvider:
             region: us-east-1
           providerConfigRef:
-            name: floci
+            name: ministack
       patches:
         # default: s3-<claim-name>
         - type: CombineFromComposite

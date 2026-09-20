@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ministack
+  namespace: ministack
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: ministack
+  template:
+    metadata:
+      labels:
+        app: ministack
+    spec:
+      # Kubernetes auto-injects <SERVICE_NAME>_PORT=tcp://<ip>:4566 into every
+      # pod in this namespace from the "ministack" Service below. Floci (the
+      # emulator this replaced) crashed on exactly this collision with its own
+      # FLOCI_PORT config property; disabling it here is cheap insurance even
+      # though MiniStack's documented port var is GATEWAY_PORT, not
+      # MINISTACK_PORT.
+      enableServiceLinks: false
+      containers:
+        - name: ministack
+          image: ministackorg/ministack:latest
+          ports:
+            - containerPort: 4566
+          env:
+            - name: PERSIST_STATE
+              value: "1"
+            - name: S3_PERSIST
+              value: "1"
+          volumeMounts:
+            - name: data
+              subPath: state
+              mountPath: /tmp/ministack-state
+            - name: data
+              subPath: s3
+              mountPath: /tmp/ministack-data/s3
+          readinessProbe:
+            tcpSocket:
+              port: 4566
+            initialDelaySeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: 4566
+            initialDelaySeconds: 15
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: ministack-data

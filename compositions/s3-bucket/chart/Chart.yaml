@@ -1,6 +1,6 @@
 apiVersion: v2
 name: s3-bucket
-description: XRD + Composition that provisions an S3 bucket in Floci (local AWS emulator)
+description: XRD + Composition that provisions an S3 bucket in MiniStack (local AWS emulator)
 type: application
 version: 0.1.0
 appVersion: "0.1.0"

@@ -1,8 +1,8 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: floci-ingress
-  namespace: floci
+  name: stackport-ingress
+  namespace: ministack
   annotations:
     cert-manager.io/cluster-issuer: "lab-ca-issuer"
     traefik.ingress.kubernetes.io/router.tls: "true"
@@ -10,16 +10,16 @@ spec:
   ingressClassName: traefik
   tls:
     - hosts:
-        - floci.127-0-0-1.nip.io
-      secretName: floci-tls
+        - stackport.127-0-0-1.nip.io
+      secretName: stackport-tls
   rules:
-    - host: floci.127-0-0-1.nip.io
+    - host: stackport.127-0-0-1.nip.io
       http:
         paths:
           - path: /
             pathType: Prefix
             backend:
               service:
-                name: floci-ui
+                name: stackport
                 port:
-                  number: 4500
+                  number: 8080

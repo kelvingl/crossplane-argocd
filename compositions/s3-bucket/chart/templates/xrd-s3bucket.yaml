@@ -30,7 +30,7 @@ spec:
                         Nome do bucket S3. Se omitido, usa "s3-<nome-do-claim>".
                     region:
                       type: string
-                      description: Região "AWS" reportada ao emulador (Floci não valida).
+                      description: Região "AWS" reportada ao emulador (MiniStack não valida).
                       default: us-east-1
                   required: []
               required:
@@ -40,4 +40,4 @@ spec:
               properties:
                 bucketName:
                   type: string
-                  description: Nome final do bucket criado no Floci.
+                  description: Nome final do bucket criado no MiniStack.

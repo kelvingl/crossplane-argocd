@@ -1,12 +1,12 @@
 apiVersion: aws.upbound.io/v1beta1
 kind: ProviderConfig
 metadata:
-  name: floci
+  name: ministack
 spec:
   credentials:
     source: Secret
     secretRef:
-      name: floci-aws-credentials
+      name: ministack-aws-credentials
       namespace: crossplane-system
       key: creds
   endpoint:
@@ -14,7 +14,7 @@ spec:
     services: [s3]
     url:
       type: Static
-      static: http://floci.floci.svc.cluster.local:4566
+      static: http://ministack.ministack.svc.cluster.local:4566
   skip_credentials_validation: true
   skip_metadata_api_check: true
   skip_region_validation: true

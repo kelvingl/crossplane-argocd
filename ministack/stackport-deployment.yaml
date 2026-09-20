@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stackport
+  namespace: ministack
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: stackport
+  template:
+    metadata:
+      labels:
+        app: stackport
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: stackport
+          image: davireis/stackport:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - name: AWS_ENDPOINT_URL
+              value: http://ministack.ministack.svc.cluster.local:4566
+            - name: AWS_REGION
+              value: us-east-1
+            # MiniStack/LocalStack-style emulators don't validate credentials
+            # — "test"/"test" is the universal convention, not a real secret
+            # (constitution Principle V is about real credentials).
+            - name: AWS_ACCESS_KEY_ID
+              value: test
+            - name: AWS_SECRET_ACCESS_KEY
+              value: test
+          readinessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 5

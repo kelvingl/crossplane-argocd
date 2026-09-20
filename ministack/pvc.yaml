@@ -1,8 +1,8 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: floci-data
-  namespace: floci
+  name: ministack-data
+  namespace: ministack
 spec:
   accessModes:
     - ReadWriteOnce
