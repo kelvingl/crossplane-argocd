@@ -1,31 +1,29 @@
 apiVersion: argoproj.io/v1alpha1
 kind: ApplicationSet
 metadata:
-  name: dataplanes
+  name: dataplane-clusters
   namespace: argocd
   annotations:
-    argocd.argoproj.io/sync-wave: "2"
+    argocd.argoproj.io/sync-wave: "1"
 spec:
   generators:
     - git:
         repoURL: http://gogs.gogs.svc.cluster.local:3000/gitadmin/dataplanes.git
         revision: main
         directories:
-          - path: "*"
-          - path: "clusters"
-            exclude: true
+          - path: "clusters/*"
   template:
     metadata:
-      name: "dataplane-{{path.basename}}"
+      name: "cluster-{{path.basename}}"
       namespace: argocd
     spec:
       project: default
       sources:
         - repoURL: http://gogs.gogs.svc.cluster.local:3000/gitadmin/platform.git
           targetRevision: main
-          path: compositions/dataplane-advanced/instance-chart
+          path: charts/argocd-cluster
           helm:
-            releaseName: "{{path.basename}}"
+            releaseName: "cluster-{{path.basename}}"
             valueFiles:
               - $values/{{path.basename}}/values.yaml
         - repoURL: http://gogs.gogs.svc.cluster.local:3000/gitadmin/dataplanes.git
@@ -33,7 +31,7 @@ spec:
           ref: values
       destination:
         server: https://kubernetes.default.svc
-        namespace: default
+        namespace: argocd
       syncPolicy:
         automated:
           prune: true

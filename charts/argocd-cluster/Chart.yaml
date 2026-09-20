@@ -1,0 +1,6 @@
+apiVersion: v2
+name: argocd-cluster
+description: Registers a spoke as an ArgoCD Cluster, reading its kubeconfig from the Secret already created by scripts/03-register-spokes.sh (never from values)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

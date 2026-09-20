@@ -50,7 +50,6 @@ Rode os scripts em ordem (todos em `scripts/`, bash/Git Bash):
 ./scripts/04-bootstrap-gogs.sh     # sobe o Gogs no hub (fora do GitOps, "bootstrap")
 ./scripts/05-push-to-gogs.sh       # cria repo + usuário admin no Gogs e faz push deste repo
 ./scripts/06-install-argocd.sh     # instala o ArgoCD no hub
-./scripts/16-register-argocd-clusters.sh  # registra spoke-01/spoke-02 como Clusters no ArgoCD
 ./scripts/07-bootstrap-gitops.sh   # cria o Repository do Gogs no ArgoCD + a Application raiz (app of apps)
 ```
 
@@ -166,11 +165,17 @@ Credenciais:
 - ArgoCD: **sem login** — acesso anônimo habilitado com role `admin` (lab local, sem exposição externa; ver `scripts/06-install-argocd.sh`). Se preferir reativar o login, remova `users.anonymous.enabled` do `argocd-cm` e `policy.default` do `argocd-rbac-cm` — a senha inicial do admin continua disponível em `argocd-initial-admin-secret` (`kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d`).
 
 Em **Settings > Clusters** o ArgoCD mostra `spoke-01` e `spoke-02` como clusters
-registrados (além do `in-cluster`, que é o próprio hub) — ver
-`scripts/16-register-argocd-clusters.sh`. Isso é só visibilidade/topologia por
-enquanto: o provisionamento dos dataplanes continua sendo feito pelo Crossplane
-via `provider-kubernetes` (os `ProviderConfig`s em `crossplane/config/`), não por
-uma `Application` do ArgoCD endereçada diretamente a esses clusters.
+registrados (além do `in-cluster`, que é o próprio hub). Esse registro é
+GitOps: declarado em `clusters/<spoke>/values.yaml` no repositório `dataplanes`
+e aplicado pelo `ApplicationSet` `dataplane-clusters`
+(`gitops/apps/dataplane-clusters-appset.yaml`), que renderiza o chart
+`charts/argocd-cluster` — o chart nunca recebe credenciais via Git, ele lê o
+kubeconfig do spoke direto do Secret que `scripts/03-register-spokes.sh` já
+cria em `crossplane-system` (Helm `lookup`). Isso é só visibilidade/topologia
+por enquanto: o provisionamento dos dataplanes continua sendo feito pelo
+Crossplane via `provider-kubernetes` (os `ProviderConfig`s em
+`crossplane/config/`), não por uma `Application` do ArgoCD endereçada
+diretamente a esses clusters.
 - Gogs: `gitadmin` / `ChangeMe123!`
 - MiniStack/StackPort: sem login (emulador local, credenciais AWS fake `test`/`test`)
 
@@ -196,8 +201,9 @@ Depois:
 ```
 bootstrap/gogs/          manifests do Gogs (aplicados uma vez fora do Argo; depois o Argo os "adota")
 gitops/root/              Application raiz (app of apps)
-gitops/apps/               Applications filhas + o ApplicationSet "dataplanes"
+gitops/apps/               Applications filhas + os ApplicationSets "dataplanes" e "dataplane-clusters"
 gitops/argocd/             Ingress/TLS do ArgoCD e Gogs, ClusterIssuers, config do Traefik
+charts/argocd-cluster/    chart usado pelo ApplicationSet "dataplane-clusters" (registra um spoke como Cluster no ArgoCD via Helm lookup)
 registry/                 manifests do registry OCI privado (Deployment/Service/Ingress/Certificate)
 ministack/                manifests do MiniStack + StackPort UI (emulador local de AWS)
 compositions/              uma pasta por Composition, cada uma com seu próprio Makefile (dev/build/push/test)
