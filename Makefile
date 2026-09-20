@@ -1,4 +1,4 @@
-COMPOSITIONS := dataplane-baseline dataplane-advanced
+COMPOSITIONS := dataplane-baseline dataplane-advanced s3-bucket
 KUBECONTEXT  ?= k3d-hub
 KUBECTL      ?= kubectl --context $(KUBECONTEXT)
 

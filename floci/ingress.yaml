@@ -1,0 +1,25 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: floci-ingress
+  namespace: floci
+  annotations:
+    cert-manager.io/cluster-issuer: "lab-ca-issuer"
+    traefik.ingress.kubernetes.io/router.tls: "true"
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - floci.127-0-0-1.nip.io
+      secretName: floci-tls
+  rules:
+    - host: floci.127-0-0-1.nip.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: floci-ui
+                port:
+                  number: 4500

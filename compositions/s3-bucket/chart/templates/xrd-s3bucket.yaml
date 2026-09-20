@@ -1,0 +1,43 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xs3buckets.lab.example.org
+spec:
+  group: lab.example.org
+  names:
+    kind: XS3Bucket
+    plural: xs3buckets
+  claimNames:
+    kind: S3Bucket
+    plural: s3buckets
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                parameters:
+                  type: object
+                  properties:
+                    bucketName:
+                      type: string
+                      description: >-
+                        Nome do bucket S3. Se omitido, usa "s3-<nome-do-claim>".
+                    region:
+                      type: string
+                      description: Região "AWS" reportada ao emulador (Floci não valida).
+                      default: us-east-1
+                  required: []
+              required:
+                - parameters
+            status:
+              type: object
+              properties:
+                bucketName:
+                  type: string
+                  description: Nome final do bucket criado no Floci.

@@ -1,0 +1,47 @@
+# Provisiona um bucket S3 no Floci (emulador local de AWS) via
+# provider-aws-s3, usando o ProviderConfig "floci"
+# (crossplane/config/providerconfig-floci.yaml).
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xs3buckets.lab.example.org
+  labels:
+    lab.example.org/provider: aws-s3-floci
+spec:
+  compositeTypeRef:
+    apiVersion: lab.example.org/v1alpha1
+    kind: XS3Bucket
+  resources:
+    - name: bucket
+      base:
+        apiVersion: s3.aws.upbound.io/v1beta1
+        kind: Bucket
+        spec:
+          forProvider:
+            region: us-east-1
+          providerConfigRef:
+            name: floci
+      patches:
+        # default: s3-<claim-name>
+        - type: CombineFromComposite
+          combine:
+            variables:
+              - fromFieldPath: metadata.labels[crossplane.io/claim-name]
+            strategy: string
+            string:
+              fmt: "s3-%s"
+          toFieldPath: metadata.name
+        # explicit override, if the claim sets one
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.bucketName
+          toFieldPath: metadata.name
+          policy:
+            fromFieldPath: Optional
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.region
+          toFieldPath: spec.forProvider.region
+          policy:
+            fromFieldPath: Optional
+        - type: ToCompositeFieldPath
+          fromFieldPath: metadata.name
+          toFieldPath: status.bucketName
