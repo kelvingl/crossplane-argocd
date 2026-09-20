@@ -1,0 +1,31 @@
+{{- if not .Values.cluster }}
+{{- fail "values.cluster é obrigatório (ex.: spoke-01)" }}
+{{- end }}
+{{- range .Values.compositions }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: "dataplane-{{ $.Values.cluster }}-{{ .name }}"
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  project: default
+  source:
+    repoURL: http://gogs.gogs.svc.cluster.local:3000/gitadmin/platform.git
+    targetRevision: main
+    path: "{{ include "dataplane-cluster.compositionChartPath" .composition }}"
+    helm:
+      releaseName: "{{ .name }}"
+      valuesObject:
+        spoke: "{{ $.Values.cluster }}"
+        {{- toYaml (.values | default dict) | nindent 8 }}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+{{- end }}

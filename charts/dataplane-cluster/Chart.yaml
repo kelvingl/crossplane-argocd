@@ -1,0 +1,6 @@
+apiVersion: v2
+name: dataplane-cluster
+description: Renders one spoke's child Applications (charts applied directly on the spoke, composition claims applied on the hub) from a dataplanes/<spoke>.yaml file
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

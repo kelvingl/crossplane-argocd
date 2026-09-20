@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # Registra, como Cluster do ArgoCD, cada spoke declarado no repositório
-# "dataplanes" em clusters/<spoke>/ (mesma convenção de pasta usada para as
-# instâncias de dataplane, em clusters/ em vez da raiz — ver README desse
-# repo). O repositório dataplanes é a fonte de verdade de "quais clusters
-# devem existir"; este script só aplica.
+# "dataplanes" em dataplanes/<spoke>.yaml (campo "cluster:") — o mesmo
+# arquivo que também lista quais charts/compositions rodam nesse spoke (ver
+# README desse repo). Como spoke = cluster = dataplane, um arquivo só faz
+# as duas coisas: "isto existe" (registrado aqui) e "isto roda nele" (lido
+# pelo ApplicationSet "dataplanes" via git files generator). O repositório
+# dataplanes é a fonte de verdade de "quais clusters devem existir"; este
+# script só aplica.
 #
 # Por que um script, e não um ApplicationSet/Helm chart: tentamos primeiro
 # um chart com Helm `lookup` lendo o kubeconfig do spoke ao vivo (evitando
@@ -77,13 +80,18 @@ register_cluster() {
   | kubectl --context k3d-hub apply -f -
 }
 
-if [ ! -d "$TMP_CLONE/clusters" ]; then
-  echo "!! $TMP_CLONE/clusters não existe no repo dataplanes — nada para registrar" >&2
+if [ ! -d "$TMP_CLONE/dataplanes" ]; then
+  echo "!! $TMP_CLONE/dataplanes não existe no repo dataplanes — nada para registrar" >&2
   exit 0
 fi
 
-for dir in "$TMP_CLONE"/clusters/*/; do
-  spoke="$(basename "$dir")"
+for f in "$TMP_CLONE"/dataplanes/*.yaml; do
+  [ -e "$f" ] || continue
+  spoke="$(sed -n -E 's/^cluster: *"?([^"[:space:]]+)"?.*/\1/p' "$f" | head -n1)"
+  if [ -z "$spoke" ]; then
+    echo "!! $f não tem campo 'cluster:' — pulando" >&2
+    continue
+  fi
   register_cluster "$spoke"
 done
 
