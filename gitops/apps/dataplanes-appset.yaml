@@ -6,9 +6,6 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "2"
 spec:
-  goTemplate: true
-  goTemplateOptions:
-    - missingkey=error
   generators:
     - git:
         repoURL: http://gogs.gogs.svc.cluster.local:3000/gitadmin/dataplanes.git
@@ -17,22 +14,23 @@ spec:
           - path: "dataplanes/*.yaml"
   template:
     metadata:
-      name: "dataplane-{{.cluster}}"
+      name: "dataplane-{{cluster}}"
       namespace: argocd
       annotations:
         argocd.argoproj.io/sync-wave: "2"
     spec:
       project: default
-      source:
-        repoURL: http://gogs.gogs.svc.cluster.local:3000/gitadmin/platform.git
-        targetRevision: main
-        path: charts/dataplane-cluster
-        helm:
-          releaseName: "dataplane-{{.cluster}}"
-          valuesObject:
-            cluster: "{{.cluster}}"
-            charts: {{.charts | toJson}}
-            compositions: {{.compositions | toJson}}
+      sources:
+        - repoURL: http://gogs.gogs.svc.cluster.local:3000/gitadmin/platform.git
+          targetRevision: main
+          path: charts/dataplane-cluster
+          helm:
+            releaseName: "dataplane-{{cluster}}"
+            valueFiles:
+              - $values/dataplanes/{{path.basename}}
+        - repoURL: http://gogs.gogs.svc.cluster.local:3000/gitadmin/dataplanes.git
+          targetRevision: main
+          ref: values
       destination:
         server: https://kubernetes.default.svc
         namespace: argocd
