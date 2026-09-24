@@ -28,6 +28,10 @@ spec:
             values:
               exportKubeConfig:
                 insecure: false
+              sync:
+                toHost:
+                  ingresses:
+                    enabled: true
           providerConfigRef:
             name: hub
       patches:
