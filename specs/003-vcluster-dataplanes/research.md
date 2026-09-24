@@ -102,32 +102,39 @@ impractical during implementation.
 
 ## 5. RBAC: what does `provider-helm`'s `InjectedIdentity` credential need?
 
-**Decision** (revised after checking `provider-helm`'s own official in-cluster
-example, `examples/cluster/provider-config/provider-incluster.yaml` at v1.4.0):
-grant effectively `cluster-admin`-level permissions, delivered via an aggregated
-`ClusterRole` (label `rbac.crossplane.io/aggregate-to-crossplane: "true"`, the same
-mechanism `provider-kubernetes`'s existing RBAC already uses in this repo) with
-wildcard rules (`apiGroups: ["*"], resources: ["*"], verbs: ["*"]`), instead of the
-upstream example's more manual `DeploymentRuntimeConfig` + fixed ServiceAccount name
-+ explicit `ClusterRoleBinding` to `cluster-admin`.
+**Decision** (revised twice — first from reasoning, then corrected again by a live
+test failure): follow `provider-helm`'s own official in-cluster example exactly —
+`DeploymentRuntimeConfig` pinning the provider's ServiceAccount name to
+`provider-helm`, plus a `ClusterRoleBinding` giving that fixed name the built-in
+`cluster-admin` `ClusterRole` directly.
 
-**Rationale**: The upstream example itself grants `cluster-admin` for exactly this
-scenario, because a `Release`'s chart is arbitrary and unknown ahead of time — Helm
-can install almost any resource type/RBAC object, so scoping precisely the way
-`provider-kubernetes-secrets` does for a single resource type (`secrets`) isn't
-practical here. This repo already proves Crossplane's rbac-manager auto-aggregates
-labeled `ClusterRole`s into a provider revision's real ServiceAccount (that's how
-`provider-kubernetes` gets its secret-read access without anyone hardcoding its
-generated SA name) — reusing that same mechanism for `provider-helm`, just with a
-wider rule set, avoids introducing a second, different RBAC-wiring mechanism
-(`DeploymentRuntimeConfig`) into this repo for a permission level upstream itself
-already treats as equivalent to `cluster-admin`.
+**What was tried first and why it didn't work**: reusing this repo's
+`rbac.crossplane.io/aggregate-to-crossplane: "true"` label (the mechanism
+`provider-kubernetes-secrets` uses) with a wildcard-rules `ClusterRole`, on the
+theory that it would aggregate into whatever ServiceAccount Crossplane generates
+for the `provider-helm` revision — the same way `provider-kubernetes` seems to gain
+its secret-read access. Applying a test `DataPlane` claim failed immediately:
+`cannot create resource "namespaces" ... at the cluster scope` for
+`provider-helm`'s actual generated ServiceAccount. Inspecting the live cluster
+showed why: the `crossplane` `ClusterRole` that label aggregates into is bound, via
+`ClusterRoleBinding`, only to the `crossplane` core controller's own ServiceAccount
+— not to any provider's. Each provider instead gets its own per-revision
+auto-generated `crossplane:provider:<revision>:system` `ClusterRole`, scoped to its
+own CRDs plus a fixed baseline (`secrets`/`configmaps`/`events`/`leases`) — which is
+almost certainly why `provider-kubernetes` already works without
+`provider-kubernetes-secrets` actually doing anything for it either; that
+`ClusterRole` may have been redundant since it was added, not a mechanism this
+feature could extend.
 
-**Alternatives considered**: Following the upstream example exactly
-(`DeploymentRuntimeConfig` fixing the ServiceAccount name to `provider-helm`, then a
-named `ClusterRoleBinding` to the built-in `cluster-admin` `ClusterRole`) — works
-identically in practice; rejected only to keep this repo's RBAC-wiring pattern
-single and consistent across providers, not because it's wrong.
+**Rationale for the fix**: A per-revision generated ServiceAccount name can't be
+targeted by a stable `ClusterRoleBinding` directly, so the ServiceAccount name has
+to be pinned first (`DeploymentRuntimeConfig`) before binding it. `cluster-admin`
+(not a scoped role) matches the upstream example precisely because a `Release`'s
+chart is arbitrary and unknown ahead of time.
+
+**Alternatives considered**: None further — this is the vendor-documented pattern
+for exactly this scenario, confirmed necessary by direct testing rather than
+assumed.
 
 ## 6. What does the `XDataPlane` Composition's claim schema need?
 
