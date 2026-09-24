@@ -30,6 +30,11 @@ spec:
             - --enable-skip-login
             - --enable-insecure-login
             - --disable-settings-authorizer
+            # Default namespace is hardcoded to "kube-system" upstream --
+            # must match wherever this chart is actually deployed, or the
+            # container panics looking for its own Secrets (see
+            # secrets.yaml) in the wrong namespace.
+            - --namespace={{ .Release.Namespace }}
           ports:
             - containerPort: 9090
           volumeMounts:
