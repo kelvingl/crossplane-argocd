@@ -44,5 +44,10 @@ spec:
               - fromFieldPath: metadata.labels[crossplane.io/claim-name]
             strategy: string
             string:
-              fmt: "https://%s.%s.svc.cluster.local:443"
+              # Short "<name>.<namespace>" form, not the full
+              # "...svc.cluster.local" FQDN: vcluster's own TLS certificate
+              # only covers the short form as a SAN (confirmed by testing —
+              # the full FQDN fails certificate verification), and the short
+              # form resolves fine via the pod's DNS search list.
+              fmt: "https://%s.%s:443"
           toFieldPath: spec.forProvider.values.exportKubeConfig.server

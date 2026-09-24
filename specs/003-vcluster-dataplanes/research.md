@@ -29,15 +29,21 @@ internal manifest changes by hand.
 ## 2. How does an existing spoke-addressing mechanism reach a vcluster, given it used to reach a real k3d cluster over a shared Docker network?
 
 **Decision**: Configure the vcluster chart's values so the kubeconfig it
-auto-generates uses the in-cluster Service DNS name
-(`https://<release>.<namespace>.svc.cluster.local:443`, the standard vcluster chart
-`exportKubeConfig` override) as the `server`, instead of its `localhost`-oriented
-default (meant for `vcluster connect`/local port-forward workflows). Both consumers
-of a spoke's kubeconfig — `provider-kubernetes`'s `ProviderConfig` and the
-ArgoCD-cluster-registration script — already run *inside* the hub cluster, so
-standard Kubernetes Service DNS resolves natively. This is simpler than the
+auto-generates uses the in-cluster Service DNS name as the `server` — but the
+**short** two-label form, `https://<release>.<namespace>:443`, not the full FQDN
+(`...svc.cluster.local`). Confirmed by direct testing (a debug pod mounting the
+generated kubeconfig Secret): the vcluster's own TLS certificate's SANs include
+`kubernetes.default.svc.cluster.local`, the release name alone, and
+`<release>.<namespace>`, but **not** `<release>.<namespace>.svc.cluster.local` — so
+the full FQDN fails certificate verification
+(`x509: certificate is valid for ... not <fqdn>`) while the short form succeeds with
+real TLS (no `insecure-skip-tls-verify` needed at all, see #3). The short form
+resolves correctly via the pod's default DNS search list (confirmed via `getent
+hosts`). Both consumers of a spoke's kubeconfig — `provider-kubernetes`'s
+`ProviderConfig` and the ArgoCD-cluster-registration script — already run *inside*
+the hub cluster, so this resolves natively. Simpler than the
 Docker-network-container-IP workaround `scripts/03-register-spokes.sh` needed for
-real k3d spokes (no `--tls-san`/`insecure-skip-tls-verify` hack required — see #3).
+real k3d spokes either way.
 
 **Rationale**: The whole reason the old mechanism needed a manual kubeconfig
 rewrite (container IP substitution, dropped CA, `insecure-skip-tls-verify`) was that
@@ -56,35 +62,34 @@ the platform itself must serve).
 
 ## 3. TLS: can `insecure-skip-tls-verify` be dropped?
 
-**Decision**: Attempt to consume the vcluster-generated kubeconfig's own
-`certificate-authority-data` as-is (vcluster issues its API server's serving
-certificate for its own Service's DNS name by default in recent chart versions).
-Fall back to `insecure-skip-tls-verify: true` (matching the existing k3d-spoke
-precedent) only if the shipped CA does not validate against the Service DNS name
-actually used — to be confirmed empirically during implementation, same as several
-other integration details in this project's history (e.g. the registry's TLS
-handling, ADR-006/007-equivalent discoveries in feature 002).
+**Decision**: Yes, confirmed by direct testing — dropped entirely. The
+vcluster-generated kubeconfig's own `certificate-authority-data`, combined with
+using the short `<release>.<namespace>` server form (see #2), verifies
+successfully; `kubectl get ns` against the freshly-created `dataplane-cluster-test`
+vcluster succeeded with zero TLS flags. `exportKubeConfig.insecure` stays `false`
+(the chart's own default).
 
 **Rationale**: Prefer real TLS verification when it's free; this lab has never
 treated `insecure-skip-tls-verify` as a goal, only as a pragmatic workaround for a
-specific constraint (SANs not covering a Docker container IP) that no longer applies
+specific constraint (SANs not covering a Docker container IP) that doesn't apply
 once the "spoke" is a Service inside the same cluster.
 
-**Alternatives considered**: None — this is a low-risk, empirically-resolved detail,
-not a design fork.
+**Alternatives considered**: None needed — resolved cleanly on the first real test.
 
 ## 4. Where does the vcluster's kubeconfig Secret actually land, and what shape is it?
 
-**Decision**: Read it directly from wherever the vcluster chart creates it — confirmed
-from the chart's own `values.yaml` (`exportKubeConfig.secret`, "If this is not
-defined, vCluster will create it with `vc-NAME`"): a Secret named `vc-<release
-name>` in the vcluster's own namespace (same namespace as the release, since
-`exportKubeConfig.secret.namespace` is left unset). The key inside that Secret is
-expected to be `config` (vcluster's documented convention) — not verified against
-the chart's static templates (it's written at runtime by the running vcluster
-control-plane process, not a Helm template), so this one specific detail is
-confirmed empirically during implementation, not just from the chart source.
-Either way, this is read directly rather than copied into a fixed
+**Decision**: Read it directly from wherever the vcluster chart creates it —
+confirmed by both the chart's own `values.yaml` comment and direct testing: a Secret
+named `vc-<release name>` in the vcluster's own namespace (its creation is logged by
+the running syncer: `"Applied kube config secret <namespace>/vc-<name>"`). Better
+than expected: it has **separate, already-decoded-shape keys**, not just one
+`config` blob needing YAML parsing — `certificate-authority`, `client-certificate`,
+`client-key`, `token`, and `config` (the full kubeconfig, for convenience/tools that
+want it). `ProviderConfig`/the registration script can read `certificate-authority`,
+`client-certificate`, and `client-key` directly, no kubeconfig-YAML parsing
+required — simpler than the `kubectl config view --kubeconfig=...` extraction
+`scripts/16-register-argocd-clusters.sh` previously needed for a real k3d spoke's
+kubeconfig file. Read directly rather than copied into a fixed
 `crossplane-system/<spoke>-kubeconfig` Secret the way
 `scripts/03-register-spokes.sh` used to create by hand — both
 `ProviderConfig.spec.credentials.secretRef` and the ArgoCD-registration script
