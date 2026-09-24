@@ -141,7 +141,7 @@ current state.
 - [x] T041 [P] Update `docs/gitops-workflow.md`: the `dataplanes` `ApplicationSet`/wrapper-chart section now also describes the always-rendered `DataPlane` claim child
 - [x] T042 [P] Add ADR(s) to `docs/decisions.md` documenting: the vcluster-vs-real-k3d decision, the `provider-helm` choice, the `XDataPlane` name-reuse/retirement decision, and any real issues hit during implementation (RBAC, kubeconfig Secret shape/key, TLS) — following this project's existing ADR format, only for what was actually encountered, not hypothetical
 - [x] T043 Update `docs/README.md`'s ADR entry count to match the final number added in T042
-- [ ] T044 Final full health check: every ArgoCD `Application` `Synced`/`Healthy`; both migrated spokes and `spoke-03`'s teardown all re-verified in one pass; commit and push everything (platform repo to `origin`+`gogs`, `dataplanes` repo to `gogs`)
+- [x] T044 Final full health check: every ArgoCD `Application` `Synced`/`Healthy`; both migrated spokes and `spoke-03`'s teardown all re-verified in one pass; commit and push everything (platform repo to `origin`+`gogs`, `dataplanes` repo to `gogs`)
 
 ---
 
