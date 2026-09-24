@@ -1,9 +1,10 @@
 # Compositions
 
 Duas Crossplane Compositions existem hoje neste repositório, cada uma em sua
-própria pasta sob `compositions/<name>/`, com seu próprio `Makefile` expondo o
+própria pasta sob `gitops/crossplane/compositions/<name>/`, com seu próprio `Makefile` expondo o
 mesmo conjunto de alvos (`dev`, `build`, `push`, `test`, `clean`) e um Helm
-chart em `chart/` — nenhuma Composition é instalada por diretório solto
+chart em `chart/` (definições dos recursos em `chart/templates/definitions/`)
+— nenhuma Composition é instalada por diretório solto
 (Constitution Technology Constraints: "Any Composition... MUST be packaged and
 released as a Helm chart"). O `Makefile` na raiz do repo apenas itera sobre
 `COMPOSITIONS := dataplane-cluster s3-bucket`, delegando para o Makefile de
@@ -19,7 +20,7 @@ cada uma (`make build-all`, `make test-<nome>`, `make release-<nome>`, etc.).
 ## 1. `dataplane-cluster` — cria o spoke em si (vcluster)
 
 **XRD**: `xdataplanes.lab.example.org` / claim `DataPlane`
-(`compositions/dataplane-cluster/chart/templates/xrd-dataplane.yaml`).
+(`gitops/crossplane/compositions/dataplane-cluster/chart/templates/definitions/xrd-dataplane.yaml`).
 
 **Reaproveita o nome de uma Composition retirada (feature 001)**: até a
 feature 003 (vcluster-dataplanes), `XDataPlane`/`DataPlane` era a Composition
@@ -42,16 +43,16 @@ sobrescrito para a forma curta `https://<nome>.<nome>:443` (o certificado do
 próprio vcluster só cobre essa forma como SAN, não o FQDN completo
 `...svc.cluster.local` — confirmado testando, não suposto).
 
-**Como é empacotado**: `compositions/dataplane-cluster/chart/`, releaseName
+**Como é empacotado**: `gitops/crossplane/compositions/dataplane-cluster/chart/`, releaseName
 `dataplane-cluster`. Instalado pela Application `crossplane-compositions`
 (`gitops/apps/crossplane-compositions.yaml`, sync-wave `"1"`).
 
-**Makefile** (`compositions/dataplane-cluster/Makefile`): `dev`/`build` fazem
+**Makefile** (`gitops/crossplane/compositions/dataplane-cluster/Makefile`): `dev`/`build` fazem
 `helm lint`/`helm template`; `push` é um no-op (não há imagem — é YAML puro);
 `test` aplica um claim de exemplo, espera `Ready` (o vcluster de fato subir
 pode levar ~1min), remove.
 
-**Exemplo**: `compositions/dataplane-cluster/examples/claim-dataplane.yaml`.
+**Exemplo**: `gitops/crossplane/compositions/dataplane-cluster/examples/claim-dataplane.yaml`.
 
 Normalmente uma claim `DataPlane` não é aplicada à mão: o `ApplicationSet`
 `dataplanes` gera uma automaticamente para cada `dataplanes/<spoke>.yaml` no
@@ -61,7 +62,7 @@ ver `docs/gitops-workflow.md`).
 ## 2. `s3-bucket` — Bucket S3 no MiniStack
 
 **XRD**: `xs3buckets.lab.example.org` / claim `S3Bucket`
-(`compositions/s3-bucket/chart/templates/xrd-s3bucket.yaml`).
+(`gitops/crossplane/compositions/s3-bucket/chart/templates/definitions/xrd-s3bucket.yaml`).
 
 **Parâmetros**: `bucketName` (opcional, default `s3-<claim-name>`), `region`
 (default `us-east-1`, não validado pelo MiniStack).
@@ -71,20 +72,20 @@ ver `docs/gitops-workflow.md`).
 clássico — não usa function-pipeline. `providerConfigRef.name: ministack` é fixo
 na base do recurso (não vem de `spec.parameters.spoke`, porque este alvo não é
 um spoke k3d: é o MiniStack rodando no hub via
-`crossplane/config/providerconfig-ministack.yaml`). O nome do bucket é resolvido
+`gitops/crossplane/config/providerconfig-ministack.yaml`). O nome do bucket é resolvido
 por dois patches em sequência: primeiro `CombineFromComposite` calcula
 `s3-<claim-name>`, depois um `FromCompositeFieldPath` opcional sobrescreve com
 `spec.parameters.bucketName` se o claim o define. O nome final é refletido em
 `status.bucketName`.
 
-**Como é empacotado**: `compositions/s3-bucket/chart/`, releaseName
+**Como é empacotado**: `gitops/crossplane/compositions/s3-bucket/chart/`, releaseName
 `s3-bucket`, Application `crossplane-compositions-s3`, sync-wave `"1"`.
 
-**Makefile** (`compositions/s3-bucket/Makefile`): igual ao baseline — sem
+**Makefile** (`gitops/crossplane/compositions/s3-bucket/Makefile`): igual ao baseline — sem
 imagem para publicar (`push` é no-op). `test` aplica
 `examples/claim-s3bucket.yaml`, espera `Ready`, lê `status.bucketName`, remove.
 
-**Exemplo**: `compositions/s3-bucket/examples/claim-s3bucket.yaml`.
+**Exemplo**: `gitops/crossplane/compositions/s3-bucket/examples/claim-s3bucket.yaml`.
 
 ## Padrão comum entre as duas
 

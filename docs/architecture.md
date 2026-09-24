@@ -4,8 +4,10 @@ Este documento descreve a topologia atual do lab: o cluster hub e os spokes
 vcluster, a árvore app-of-apps do ArgoCD, o papel do Crossplane no modelo
 hub-and-spoke, o Gogs como única fonte GitOps, o registry OCI privado e o
 emulador de AWS (MiniStack). Tudo aqui reflete o estado real dos manifests em
-`gitops/`, `crossplane/`, `compositions/`, `charts/`, `registry/` e `ministack/`
-— não um design aspiracional.
+`gitops/` (tudo que o ArgoCD aplica: `apps/`, `appset/`, `crossplane/`,
+`dataplanes-fanout/`, `addons/`, `kubernetes-dashboard/`, `registry/`,
+`ministack/`, `argocd/`) e `bootstrap/` (o que roda uma vez, fora do Argo) —
+não um design aspiracional.
 
 ## Visão geral: 1 cluster k3d real, spokes como vclusters dentro dele
 
@@ -37,13 +39,13 @@ pelo mesmo motivo em contextos diferentes); **control-plane = hub**.
 
 Criar ou destruir um spoke é uma operação do Crossplane, não um comando de
 infraestrutura. A Composition `XDataPlane` (claim `DataPlane`,
-`compositions/dataplane-cluster/`) compõe um único recurso: um
+`gitops/crossplane/compositions/dataplane-cluster/`) compõe um único recurso: um
 `helm.crossplane.io/v1beta1` `Release` (via o provider `provider-helm`) que
 instala o chart oficial do vcluster (`https://charts.loft.sh`, chart
 `vcluster`) dentro do hub, num namespace com o mesmo nome do claim.
 `provider-helm` usa credenciais `InjectedIdentity` (sua própria identidade
 dentro do cluster) e precisa de permissões equivalentes a `cluster-admin`
-(`crossplane/providers/provider-helm.yaml`) — o conteúdo de um chart Helm é
+(`gitops/crossplane/providers/provider-helm.yaml`) — o conteúdo de um chart Helm é
 arbitrário, então não dá pra restringir a um conjunto fixo de recursos como
 se faz para `provider-kubernetes`.
 
@@ -68,7 +70,7 @@ Ver ADR correspondente em `decisions.md`.
 ## Registro de um spoke: `ProviderConfig` + Cluster do ArgoCD
 
 Cada spoke é registrado no hub como um `ProviderConfig`
-(`crossplane/config/providerconfig-spoke-*.yaml`) apontando para o Secret
+(`gitops/crossplane/config/providerconfig-spoke-*.yaml`) apontando para o Secret
 `vc-<spoke>` (namespace `<spoke>`, chave `config`) que o próprio vcluster já
 gerou — nenhuma credencial é gerada ou copiada à mão. Compositions selecionam
 o spoke alvo exclusivamente por `spec.parameters.spoke` →
@@ -80,7 +82,7 @@ quais spokes registrar vem do Git — o campo `cluster:` de cada
 `dataplanes/<spoke>.yaml` no repositório `dataplanes` (mesmo arquivo que
 também dispara a criação do `DataPlane` claim e lista o que roda naquele
 cluster, ver seção seguinte) — mas a criação do Secret com as credenciais em
-si é imperativa, `scripts/16-register-argocd-clusters.sh`, que lê
+si é imperativa, `bootstrap/scripts/16-register-argocd-clusters.sh`, que lê
 diretamente o Secret `vc-<spoke>` que o vcluster já gerou (nada de parsing de
 kubeconfig via `kubectl config view` como no modelo k3d antigo). Isso faz
 `spoke-01`/`spoke-02` aparecerem em Settings > Clusters na UI do ArgoCD, ao
@@ -110,18 +112,18 @@ repositório `dataplanes`, listando tudo que roda nele:
 
 ```yaml
 cluster: spoke-01
-charts:                    # Helm charts aplicados DIRETO no cluster do spoke
+charts:                          # Helm charts aplicados DIRETO no cluster do spoke
   - name: hello
-    chart: charts/hello     # caminho, no repo dataplanes, até o chart
+    chart: charts/hello/chart     # caminho, no repo dataplanes, até o chart
     values: { replicas: 1 }
 compositions: []            # claims de Composition, aplicadas no HUB — nenhuma
                              # composition com instance-chart disponível no momento
 ```
 
-O `ApplicationSet` `dataplanes` (`gitops/apps/dataplanes-appset.yaml`, no
+O `ApplicationSet` `dataplanes` (`gitops/appset/dataplanes-appset.yaml`, no
 repo `platform`) usa um gerador git `files` sobre `dataplanes/*.yaml` — um
 arquivo, uma Application "wrapper" `dataplane-<spoke>`, que renderiza o chart
-`charts/dataplane-cluster` (também no repo `platform`). Esse chart faz o
+`gitops/dataplanes-fanout/chart` (também no repo `platform`). Esse chart faz o
 fan-out: para cada entrada de `charts`, emite uma `Application` filha com
 `destination.name: <spoke>` (direto no cluster, sem Crossplane); para cada
 entrada de `compositions`, emite uma `Application` filha com
@@ -131,26 +133,26 @@ completo e ADR-029 em `decisions.md` para os erros reais de templating
 encontrados na migração (YAML quebrado por `{{ }}` não citado; parâmetro
 errado do gerador `files` para o nome do arquivo).
 
-## `addons/<nome>/`: instalado em todo spoke, automaticamente
+## `gitops/addons/<nome>/`: instalado em todo spoke, automaticamente
 
 Diferente de `dataplanes/<spoke>.yaml` (um arquivo por spoke, editado
 manualmente), os addons são instalados em **todo** spoke registrado no
 ArgoCD sem nenhuma edição por spoke. O `ApplicationSet`
-`dataplane-addons` (`gitops/apps/dataplane-addons-appset.yaml`) usa um
+`dataplane-addons` (`gitops/appset/dataplane-addons-appset.yaml`) usa um
 gerador `matrix` combinando:
 
 1. o gerador `clusters`, filtrado por `selector.matchLabels:
    lab.example.org/role: dataplane` — sem esse filtro, o gerador `clusters`
    também incluiria o `in-cluster` implícito (o próprio hub), onde nenhum
    addon de spoke faz sentido. O label é aplicado por
-   `scripts/16-register-argocd-clusters.sh` no Secret de cada Cluster.
-2. um gerador `git` `directories` sobre `addons/*` (chart Helm por pasta).
+   `bootstrap/scripts/16-register-argocd-clusters.sh` no Secret de cada Cluster.
+2. um gerador `git` `directories` sobre `gitops/addons/*` (chart Helm por pasta).
 
 O produto cartesiano dos dois gera uma `Application`
 (`dataplane-addons-<spoke>-<addon>`) por combinação (spoke × addon), cada
 uma com `destination.name: <spoke>` — direto no cluster, sem Crossplane,
 mesmo mecanismo das entradas `charts:`. `spoke` é injetado automaticamente
-via `valuesObject`. Dois addons de exemplo hoje (`addons/README.md` tem o
+via `valuesObject`. Dois addons de exemplo hoje (`gitops/addons/README.md` tem o
 detalhe de cada um):
 
 - **`prometheus`**: servidor Prometheus + UI, exposta via `Ingress` em
@@ -161,7 +163,7 @@ detalhe de cada um):
   subdomínio sozinho, não há um backend de DNS real para gerenciar aqui).
 
 Ambos só ficam alcançáveis de fora do cluster porque
-`compositions/dataplane-cluster` liga `sync.toHost.ingresses: true` nos
+`gitops/crossplane/compositions/dataplane-cluster` liga `sync.toHost.ingresses: true` nos
 values do chart do vcluster — um `Ingress` criado **dentro** do spoke é
 espelhado para o hub (nome sincronizado, ex.:
 `prometheus-x-prometheus-x-spoke-01`), onde o Traefik e o cert-manager reais
@@ -173,7 +175,7 @@ depois HTTPS 200 com certificado emitido pela `lab-ca-issuer`.
 ## `dataplane-dashboard`: app-of-apps filtrado a UM spoke
 
 Nem todo app-of-apps precisa ter alvo "todo spoke". `dataplane-dashboard`
-(`gitops/apps/dataplane-dashboard-appset.yaml`) usa o mesmo gerador
+(`gitops/appset/dataplane-dashboard-appset.yaml`) usa o mesmo gerador
 `clusters` do `dataplane-addons`, mas SEM o gerador `git` `directories` ao
 lado (não é um `matrix`, é um gerador `clusters` só) — e com
 `selector.matchLabels: lab.example.org/name: spoke-03` em vez de
@@ -181,8 +183,8 @@ lado (não é um `matrix`, é um gerador `clusters` só) — e com
 (`dataplane-dashboard-spoke-03`), mesmo com três spokes registrados.
 
 Instala o **Kubernetes Dashboard v2.7.0 sem autenticação** —
-`kubernetes-dashboard/` na raiz do repo (fora de `addons/` de propósito, para
-não ser pego pelo gerador `addons/*` do `dataplane-addons` e acabar instalado
+`gitops/kubernetes-dashboard/` (fora de `gitops/addons/` de propósito, para
+não ser pego pelo gerador `gitops/addons/*` do `dataplane-addons` e acabar instalado
 em todo spoke). "Sem autenticação" é uma combinação de três coisas:
 `--enable-skip-login` (mostra o botão "Skip" na tela de login),
 `--enable-insecure-login` e a `ServiceAccount` do próprio pod ligada a
@@ -242,17 +244,19 @@ flowchart TB
 ```
 
 Observação: o diagrama mostra apenas o que existe hoje nos manifests
-(`gitops/apps/*.yaml`, `ministack/`, `registry/`). MiniStack é um componente recente
+(`gitops/apps/*.yaml`, `gitops/appset/*.yaml`, `gitops/ministack/`, `gitops/registry/`). MiniStack é um componente recente
 (commit `868d5ee`) que substitui/complementa qualquer necessidade de AWS real —
 não há outro emulador AWS no repositório no momento.
 
 ## App-of-apps: da raiz aos componentes
 
 A única `Application` aplicada manualmente é `gitops/root/app-of-apps.yaml`
-(root-app-of-apps), que aponta para o diretório `gitops/apps/` (fonte `directory`,
-com `exclude` para só considerar arquivos `.yaml`/`.yml` — isso evita que
-subpastas não-Application quebrem a descoberta). Toda `Application`/`ApplicationSet`
-filha vive nesse diretório e é descoberta automaticamente.
+(root-app-of-apps), que é `sources` múltiplo apontando para dois diretórios —
+`gitops/apps/` (Applications simples) e `gitops/appset/` (ApplicationSets) —
+cada um como fonte `directory`, com `exclude` para só considerar arquivos
+`.yaml`/`.yml` (evita que subpastas não-Application quebrem a descoberta).
+Toda `Application`/`ApplicationSet` filha vive num desses dois diretórios e é
+descoberta automaticamente.
 
 Filhas atuais, por `sync-wave` (menor primeiro):
 
@@ -260,15 +264,15 @@ Filhas atuais, por `sync-wave` (menor primeiro):
 |---|---|---|---|
 | `"0"` | `gogs` | `bootstrap/gogs` (directory) | `gogs` |
 | `"0"` | `crossplane` | Helm chart oficial `charts.crossplane.io/stable` v1.20.13 | `crossplane-system` |
-| `"0"` | `registry` | `registry/` (directory) | `registry` |
-| `"0"` | `ministack` | `ministack/` (directory) | `ministack` |
-| `"1"` | `crossplane-providers` | `crossplane/providers` (directory) | `crossplane-system` |
-| `"1"` | `crossplane-compositions` | `compositions/dataplane-cluster/chart` (helm) | `crossplane-system` |
-| `"1"` | `crossplane-compositions-s3` | `compositions/s3-bucket/chart` (helm) | `crossplane-system` |
-| `"2"` | `crossplane-config` | `crossplane/config` (directory) | `crossplane-system` |
+| `"0"` | `registry` | `gitops/registry/` (directory) | `registry` |
+| `"0"` | `ministack` | `gitops/ministack/` (directory) | `ministack` |
+| `"1"` | `crossplane-providers` | `gitops/crossplane/providers` (directory) | `crossplane-system` |
+| `"1"` | `crossplane-compositions` | `gitops/crossplane/compositions/dataplane-cluster/chart` (helm) | `crossplane-system` |
+| `"1"` | `crossplane-compositions-s3` | `gitops/crossplane/compositions/s3-bucket/chart` (helm) | `crossplane-system` |
+| `"2"` | `crossplane-config` | `gitops/crossplane/config` (directory) | `crossplane-system` |
 | `"2"` | `argocd-networking` | `gitops/argocd` (directory) | `argocd` |
 | `"2"` | `dataplanes` (ApplicationSet) | git generator `files` (`dataplanes/*.yaml`) sobre o repo `dataplanes` | `argocd` (wrapper); filhas variam — spoke ou hub |
-| `"2"` | `dataplane-addons` (ApplicationSet) | `matrix`: gerador `clusters` × git `directories` (`addons/*`) | direto no spoke (por addon) |
+| `"2"` | `dataplane-addons` (ApplicationSet) | `matrix`: gerador `clusters` × git `directories` (`gitops/addons/*`) | direto no spoke (por addon) |
 | `"2"` | `dataplane-dashboard` (ApplicationSet) | gerador `clusters`, filtrado por `lab.example.org/name: spoke-03` | direto no `spoke-03` (só ele) |
 
 **Por que essa ordem:** Crossplane core precisa existir antes de qualquer
@@ -277,10 +281,10 @@ registry e o MiniStack também sobem na wave 0 porque as Compositions da wave 1
 dependem deles ficarem prontos primeiro (a Function precisa da imagem já
 publicável no registry; o `ProviderConfig ministack` referencia o MiniStack pelo
 hostname do Service). `ProviderConfig`s (wave 2) só fazem sentido depois que o
-`provider-kubernetes`/`provider-aws-s3` (wave 1, dentro de `crossplane-providers`)
-já está instalado e healthy. O `ApplicationSet` de dataplanes (wave 2) só
-funciona depois que a Composition avançada (wave 1) já registrou a XRD
-`XDataPlaneAdvanced` no cluster. Todas as filhas usam
+`provider-kubernetes`/`provider-helm`/`provider-aws-s3` (wave 1, dentro de
+`crossplane-providers`) já está instalado e healthy. O `ApplicationSet` de
+dataplanes (wave 2) só funciona depois que a Composition `dataplane-cluster`
+(wave 1) já registrou a XRD `XDataPlane` no cluster. Todas as filhas usam
 `syncPolicy.automated.{prune,selfHeal}: true` e `CreateNamespace=true`
 (Constitution Principle III), então a árvore inteira se autocorrige sem
 intervenção manual.
@@ -319,14 +323,16 @@ Constraints). Isso mantém o lab funcional sem acesso à rede externa após o
 bootstrap inicial.
 
 Há dois repositórios Gogs relevantes:
-- **`platform`** (este repositório) — tudo que ArgoCD instala diretamente:
-  charts das Compositions, manifests do registry/MiniStack, Applications,
-  ApplicationSet.
+- **`platform`** (este repositório) — tudo que ArgoCD instala diretamente vive
+  sob `gitops/` (charts das Compositions, manifests do registry/MiniStack,
+  Applications em `gitops/apps/`, ApplicationSets em `gitops/appset/`); o que
+  é bootstrap puro (fora do Argo) vive sob `bootstrap/`.
 - **`dataplanes`** — repositório separado: um arquivo `dataplanes/<spoke>.yaml`
   por cluster (charts + composition claims daquele spoke), mais os catálogos
-  `charts/` (charts Helm aplicados direto num spoke) e `compositions/`
-  (documentação do contrato de values de cada Composition instalada no hub).
-  É consumido pelo `ApplicationSet` via git generator `files`.
+  `charts/<nome>/chart/` (charts Helm aplicados direto num spoke) e
+  `compositions/` (documentação do contrato de values de cada Composition
+  instalada no hub). É consumido pelo `ApplicationSet` via git generator
+  `files`.
 
 ## Registry OCI privado
 
@@ -335,13 +341,13 @@ Há dois repositórios Gogs relevantes:
 > removida do repositório. Continua rodando (nenhuma limpeza foi pedida), mas
 > nada mais neste lab publica ou consome imagens dele hoje.
 
-`registry/` sobe um `registry:2` (CNCF distribution/distribution) como
+`gitops/registry/` sobe um `registry:2` (CNCF distribution/distribution) como
 Deployment+PVC+Service+Ingress no hub, dedicado a publicar a imagem xpkg da
 Composition Function. Pontos que fogem do "Deployment simples":
 - **TLS é terminado pelo próprio pod do registry** (`REGISTRY_HTTP_TLS_*`),
   não pelo Ingress — o cliente `crossplane xpkg push`/pull do Crossplane exige
   HTTPS verificável na origem.
-- **Service com ClusterIP fixo** (`10.43.0.50`, ver `registry/service.yaml`) —
+- **Service com ClusterIP fixo** (`10.43.0.50`, ver `gitops/registry/service.yaml`) —
   necessário porque o containerd do node não resolve `*.svc.cluster.local`
   (isso só resolve dentro do namespace de rede de um pod, via CoreDNS).
 - **Exposto via `IngressRoute` do Traefik**, não `Ingress` puro — o provider
@@ -349,17 +355,17 @@ Composition Function. Pontos que fogem do "Deployment simples":
   de forma confiável nos testes desta feature.
 - Acesso externo: `https://registry.127-0-0-1.nip.io` (push manual pelo
   operador). Acesso interno (pull pelo cluster): via mirror de containerd
-  configurado por `scripts/12-configure-hub-registry-mirror.sh`, que redireciona
+  configurado por `bootstrap/scripts/12-configure-hub-registry-mirror.sh`, que redireciona
   `registry.registry.svc.cluster.local:5000` para o ClusterIP fixo — ver
   `docs/decisions.md` para o porquê.
 
 ## MiniStack (emulador AWS local)
 
-`ministack/` sobe o MiniStack (`ministack.org`, compatível com a API do LocalStack) como
+`gitops/ministack/` sobe o MiniStack (`ministack.org`, compatível com a API do LocalStack) como
 Deployment+Service+PVC+Ingress no hub, mais um console web (`stackport`,
 Deployment+Service próprios). É consumido pelo `provider-aws-s3` (Upbound,
 v1.14.0) através do `ProviderConfig ministack`
-(`crossplane/config/providerconfig-ministack.yaml`), que aponta para
+(`gitops/crossplane/config/providerconfig-ministack.yaml`), que aponta para
 `http://ministack.ministack.svc.cluster.local:4566` com credenciais falsas
 (`skip_credentials_validation: true`, convenção universal de emuladores
 estilo LocalStack). É o único componente do lab cujo alvo de provisionamento

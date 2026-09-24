@@ -1144,6 +1144,87 @@ dois sentidos.
 
 ---
 
+### ADR-034: reorganização de pastas — `gitops/` (tudo aplicado pelo Argo) vs `bootstrap/` (tudo que não é), `apps/` vs `appset/`, `chart/templates/definitions/` em toda unidade com chart
+
+**Decisão**: reorganização completa da árvore de pastas de ambos os
+repositórios (`platform` e `dataplanes`), sem nenhuma mudança de
+comportamento:
+
+- Tudo que o ArgoCD aplica (direta ou indiretamente) passa a viver sob
+  `gitops/`: `apps/` (Applications simples), `appset/` (ApplicationSets),
+  `crossplane/{providers,config,compositions}/`, `dataplanes-fanout/`
+  (renomeado de `charts/dataplane-cluster/`), `addons/`,
+  `kubernetes-dashboard/`, `registry/`, `ministack/`, `argocd/`, `root/`.
+- Tudo que é bootstrap puro (rodado uma vez, imperativamente, fora do Argo)
+  passa a viver sob `bootstrap/`: `scripts/` (renomeado de `scripts/` na
+  raiz), `gogs/`.
+- Dentro de `gitops/apps/`, as Applications simples e os ApplicationSets
+  foram separados em duas pastas (`apps/` e `appset/`) — o `root-app-of-apps`
+  passou de single-source para multi-source, um `sources[]` por pasta.
+- Dentro de toda unidade com chart Helm (as duas Compositions, o
+  `dataplanes-fanout`, os dois addons, o `kubernetes-dashboard`, e
+  `charts/hello/` no repo `dataplanes`), os recursos K8s de fato (XRD,
+  Composition, Deployment, Service, Ingress, RBAC, ...) foram movidos para
+  `chart/templates/definitions/`, separados da plumbing do chart
+  (`Chart.yaml`, `values.yaml` na raiz do chart per convenção Helm,
+  `_helpers.tpl` que fica direto em `templates/` por ser plumbing, não uma
+  definição de recurso).
+
+**Contexto**: pedido explícito do operador, em rodadas sucessivas de
+refinamento — primeiro uma proposta pedida explicitamente ("proponha uma
+organização melhor de pastas/arquivos... quero que as definições fiquem em
+pastas diferentes dos values e de charts... o que for de bootstrap... deve
+ficar em uma pasta também"), depois duas correções: (1) `values.yaml` pode
+ficar na mesma pasta do chart, sem uma pasta `values/` separada; (2) uma
+inconsistência real na proposta inicial foi apontada pelo operador —
+`registry/`, `ministack/`, `crossplane/providers/`, `crossplane/config/` são
+todos aplicados pelo Argo e tinham ficado de fora de `gitops/` na primeira
+versão da proposta. Por fim, o operador pediu a divisão adicional
+`apps/`/`appset/` dentro de `gitops/`.
+
+**Por que multi-source no root, não duas Applications raiz**: manter uma
+única `Application` raiz (`root-app-of-apps`) evita duplicar a
+`sync-policy`/`project`/`destination` em dois lugares — um `sources[]` com
+duas entradas `directory` é o padrão nativo do ArgoCD para "uma Application,
+vários diretórios-fonte independentes", já usado neste repo pela Application
+wrapper de cada spoke (ADR-029).
+
+**Armadilha confirmada de novo (mesma classe da ADR-021/023)**: o
+`root-app-of-apps` não se autogerencia — mudar seu próprio manifest
+(`gitops/root/app-of-apps.yaml`, de single-source para multi-source) exigiu
+`kubectl apply -f` direto, já que nada monitora o próprio topo da árvore
+app-of-apps. Depois disso, o ciclo completo de cache (Redis →
+`argocd-repo-server` → `argocd-applicationset-controller`) precisou ser
+reiniciado e todas as Applications forçadas com
+`argocd.argoproj.io/refresh=hard` para que o novo layout de pastas fosse
+genuinamente reconhecido — confirmado necessário de novo mesmo já
+documentado nas ADRs anteriores, reforçando que não é um caso isolado.
+
+**Erro real pego durante a migração do repo `dataplanes`**: depois de mover
+`charts/hello/` para `charts/hello/chart/` e atualizar
+`dataplanes/spoke-01.yaml` (`chart: charts/hello` → `chart: charts/hello/chart`),
+a Application filha `dataplane-spoke-01-hello` continuou gerando com o
+`source.path` antigo mesmo após reiniciar Redis + repo-server +
+applicationset-controller uma primeira vez — precisou de uma segunda rodada
+completa do ciclo de restart, confirmando que o cache do gerador `git.files`
+sobre um repositório **diferente** do repositório da própria
+`ApplicationSet` (aqui, `dataplanes.git`, não `platform.git`) também fica
+sujeito à mesma staleness.
+
+**Status**: Aceito, verificado de ponta a ponta em ambos os repositórios:
+todas as 21 Applications do repo `platform` confirmadas `Synced`/`Healthy`
+pós-reorg com `spec.source.path` inspecionado diretamente (não só o status);
+os três `ApplicationSet`s regeneraram exatamente o mesmo conjunto de
+Applications filhas, sem duplicatas/órfãs; verificação funcional real
+(ArgoCD UI 200, Prometheus UI em `spoke-01` 200, Dashboard API em
+`spoke-03` 200 sem headers de auth, as três claims `DataPlane` `Ready`, os
+três `ProviderConfig`s presentes). No repo `dataplanes`, `charts/hello/`
+reorganizado e `dataplane-spoke-01-hello` confirmado `Synced`/`Healthy` com
+o novo `source.path` (`charts/hello/chart`) depois do segundo ciclo de
+restart de cache.
+
+---
+
 ## Resumo de decisões superadas ou com incidente associado
 
 | ADR | O que mudou | Por quê |
@@ -1162,3 +1243,4 @@ dois sentidos.
 | ADR-031 | `dataplane-advanced` removida por completo (chart, claims, Application) | Pedido explícito do operador, sem defeito técnico |
 | ADR-032 | Novo `ApplicationSet` `dataplane-addons` (cluster generator), 2 addons de exemplo | Pedido explícito do operador |
 | ADR-033 | `spoke-03` + `ApplicationSet` `dataplane-dashboard` filtrado a um spoke só | Pedido explícito do operador |
+| ADR-034 | Reorganização de pastas: `gitops/`+`bootstrap/`, `apps/`+`appset/`, `chart/templates/definitions/` | Pedido explícito do operador |
