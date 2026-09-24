@@ -44,9 +44,11 @@ A árvore app-of-apps (`gitops/apps/*.yaml`, descoberta por
 - **wave `"2"`**: `crossplane-config` (os `ProviderConfig`s, que referenciam
   providers instalados na wave 1), `argocd-networking` (Ingress/TLS —
   independente das outras, mas mantido na wave mais alta por convenção), e o
-  `ApplicationSet` `dataplanes` (precisa que a XRD `XDataPlaneAdvanced` já
-  exista no cluster, o que só acontece depois que
-  `crossplane-compositions-advanced` da wave 1 sincronizou).
+  `ApplicationSet` `dataplanes` (precisa que as XRDs `XDataPlane` e
+  `XDataPlaneAdvanced` já existam no cluster — o que só acontece depois que
+  `crossplane-compositions`/`crossplane-compositions-advanced` da wave 1
+  sincronizaram — já que o chart que ele dispara emite tanto a claim
+  `DataPlane` quanto, quando declarado, um claim `AdvancedDataPlane`).
 
 Regra geral usada neste repo (Constitution Principle III): a sync-wave de uma
 Application reflete a ordem de dependência real, nunca uma preferência
@@ -84,13 +86,26 @@ Para cada arquivo, o `ApplicationSet` gera **uma Application "wrapper"**
    `charts/dataplane-cluster/values.yaml`).
 2. **fonte 2** — o repositório `dataplanes`, referenciado só como `ref: values`.
 
-Essa Application wrapper não cria recursos de workload diretamente: seu
-único papel é `range` sobre `.Values.charts` e `.Values.compositions` e
-emitir, para cada entrada, **uma Application filha própria**
-(`dataplane-<spoke>-<nome>`) — o mesmo padrão de "Application gerando
-Application" que já existia no `root-app-of-apps`, só que agora
+> **Nomes parecidos, coisas diferentes**: `charts/dataplane-cluster/` (este
+> chart, wrapper/fan-out, existe desde ADR-029) e
+> `compositions/dataplane-cluster/` (a Composition `XDataPlane` da feature
+> 003, que cria o spoke em si) têm o mesmo nome-base por coincidência de
+> nomenclatura — são artefatos completamente distintos, em pastas de topo
+> diferentes (`charts/` vs `compositions/`).
+
+Essa Application wrapper não cria recursos de workload diretamente: sempre
+emite exatamente **uma claim `DataPlane`** (nomeada `{{ .Values.cluster }}`,
+via `charts/dataplane-cluster/templates/dataplane-claim.yaml`, direto — não
+como mais uma Application filha) e faz `range` sobre `.Values.charts` e
+`.Values.compositions`, emitindo, para cada entrada, **uma Application filha
+própria** (`dataplane-<spoke>-<nome>`) — o mesmo padrão de "Application
+gerando Application" que já existia no `root-app-of-apps`, só que agora
 parametrizado por dados vindos do Git em vez de arquivos fixos:
 
+- a claim **`DataPlane`**: é o que traz o spoke em si à existência (feature
+  003) — ver `docs/architecture.md`. Sempre emitida, mesmo que
+  `charts`/`compositions` estejam vazios: um `dataplanes/<spoke>.yaml` com só
+  `cluster: spoke-03` já é suficiente para um novo spoke nascer.
 - entradas de **`charts`**: `destination.name: <spoke>` — endereça o
   Cluster do ArgoCD registrado por `scripts/16-register-argocd-clusters.sh`
   diretamente, sem Crossplane no meio. Fonte: o próprio repo `dataplanes`,
@@ -102,22 +117,23 @@ parametrizado por dados vindos do Git em vez de arquivos fixos:
   `dataplane-advanced` → `compositions/dataplane-advanced/instance-chart`).
   O parâmetro `spoke` é injetado automaticamente a partir de `cluster:`.
 
-**Fluxo ponta a ponta para provisionar algo num spoke**:
+**Fluxo ponta a ponta para provisionar um spoke novo do zero**:
 
 ```
-1. Editar/criar dataplanes/<spoke>.yaml — adicionar uma entrada em
-   "charts" (chart direto no cluster) ou "compositions" (claim no hub)
+1. Criar dataplanes/<spoke>.yaml — só "cluster: <nome>" já basta
 2. git add / commit / push para o remote "gogs" do repo dataplanes
-   (scripts/11-push-dataplanes-repo.sh cuida da criação do repo, e
-   scripts/16-register-argocd-clusters.sh registra o spoke como Cluster
-   no ArgoCD, na primeira vez que aparece)
 3. O ApplicationSet detecta o arquivo (git generator "files") e
-   (re)sincroniza a Application "dataplane-<spoke>"
-4. Essa Application renderiza charts/dataplane-cluster, que emite uma
-   Application filha por entrada de charts/compositions
-5a. Application filha de "charts": Helm chart aplicado direto no spoke
+   sincroniza a nova Application "dataplane-<spoke>"
+4. Essa Application renderiza charts/dataplane-cluster, que emite:
+   - a claim DataPlane <spoke> (sempre)
+   - uma Application filha por entrada de charts/compositions (se houver)
+5. A claim DataPlane vira um Release do provider-helm (compositions/
+   dataplane-cluster), que instala o chart do vcluster no hub
+6. scripts/16-register-argocd-clusters.sh registra o spoke novo
+   (ProviderConfig + Cluster do ArgoCD) — passo manual, uma vez por spoke
+7a. Application filha de "charts": Helm chart aplicado direto no spoke
     (destination.name), sem Crossplane
-5b. Application filha de "compositions": renderiza um claim (ex.:
+7b. Application filha de "compositions": renderiza um claim (ex.:
     AdvancedDataPlane) no hub; a Composition (função Go) compõe os
     recursos reais como Objects do provider-kubernetes; provider-kubernetes
     aplica esses Objects no spoke indicado em "cluster:"
@@ -126,12 +142,15 @@ parametrizado por dados vindos do Git em vez de arquivos fixos:
 **Remover** uma entrada de `charts`/`compositions` remove só aquilo: a
 Application filha correspondente é podada, cascateando a exclusão do
 claim/recursos. Remover o arquivo `dataplanes/<spoke>.yaml` inteiro remove
-tudo que aquele cluster tinha declarado (a Application wrapper e todas as
-filhas). Verificado de ponta a ponta na migração da estrutura antiga
-(uma pasta por instância `adv-01`/`adv-03`) para esta — ver ADR-029 em
-`docs/decisions.md`, incluindo dois erros reais de templating pegos no
-processo (YAML inválido por `{{ }}` não citado, e o parâmetro errado do
-gerador `files` para o nome do arquivo).
+tudo que aquele cluster tinha declarado — a Application wrapper, todas as
+filhas, **e a claim `DataPlane`**, que por sua vez desprovisiona o vcluster
+inteiro. Verificado de ponta a ponta duas vezes: na migração da estrutura
+antiga (uma pasta por instância `adv-01`/`adv-03`) para esta (ADR-029), e na
+migração de `spoke-01`/`spoke-02` de clusters k3d reais para vclusters
+(feature 003) — incluindo os erros reais de templating pegos em cada uma
+(YAML inválido por `{{ }}` não citado e parâmetro errado do gerador `files`
+na primeira; RBAC do `provider-helm` e endereço de servidor do vcluster na
+segunda — ver `docs/decisions.md`).
 
 **Armadilha conhecida (não um bug, um comportamento a saber destravar)**: os
 caches em camada do ArgoCD (Redis + cache de listagem git do
@@ -157,9 +176,9 @@ colateral real que reiniciar o Redis isoladamente já causou uma vez).
 
 Cada Composition em `compositions/<nome>/` expõe o mesmo alvo de Makefile:
 `dev`, `build`, `push`, `test`, `clean`. O `Makefile` da raiz do repo itera
-sobre `COMPOSITIONS := dataplane-baseline dataplane-advanced s3-bucket`.
+sobre `COMPOSITIONS := dataplane-cluster dataplane-advanced s3-bucket`.
 
-**Compositions sem imagem** (`dataplane-baseline`, `s3-bucket`):
+**Compositions sem imagem** (`dataplane-cluster`, `s3-bucket`):
 - `dev`/`build`: `helm lint` + `helm template` do chart (nenhuma imagem
   envolvida — `push` é um no-op).
 - `test`: aplica um claim de exemplo contra o cluster real, espera
