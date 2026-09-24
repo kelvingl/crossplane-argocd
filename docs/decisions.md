@@ -951,6 +951,136 @@ removidos, com o gap do namespace documentado acima).
 
 ---
 
+### ADR-031: `dataplane-advanced` removida por completo
+
+**Decisão**: a Composition `dataplane-advanced` (XRD `XDataPlaneAdvanced` /
+claim `AdvancedDataPlane`, Composition Function em Go — feature
+002-golang-composition-pipeline) foi removida deste repositório por inteiro:
+`compositions/dataplane-advanced/` (chart, instance-chart, código-fonte Go),
+a Application `crossplane-compositions-advanced`, sua entrada no
+`COMPOSITIONS` do `Makefile` raiz, e o mapeamento em
+`charts/dataplane-cluster/templates/_helpers.tpl`. As duas claims que
+existiam (`adv-01` em `spoke-01`, `adv-03` em `spoke-02`) e as entradas
+`compositions:` que as declaravam em `dataplanes/spoke-01.yaml`/
+`spoke-02.yaml` (repo `dataplanes`) também foram removidas.
+
+**Contexto**: pedido explícito do operador, sem defeito técnico associado —
+mesmo padrão de decisão lateral já visto neste log (ADR-025/026, Floci →
+MiniStack).
+
+**Erro real pego ao verificar a remoção**: depois de esvaziar
+`compositions:` em `dataplanes/spoke-01.yaml`/`spoke-02.yaml` e sincronizar,
+as Applications filhas `dataplane-spoke-01-adv-01`/
+`dataplane-spoke-02-adv-03` foram podadas corretamente pelo ArgoCD — mas as
+claims `AdvancedDataPlane` **continuaram `Ready` no cluster**, órfãs. Causa:
+os templates que geram essas Applications filhas
+(`charts/dataplane-cluster/templates/charts.yaml` e `compositions.yaml`)
+nunca declaravam `metadata.finalizers:
+[resources-finalizer.argocd.argoproj.io]` — sem esse finalizer, deletar uma
+`Application` remove só o objeto `Application`, sem cascatear para os
+recursos que ela gerenciava. A Application "wrapper" (`dataplane-<spoke>`,
+gerada diretamente pelo `ApplicationSet`) já ganha esse finalizer
+automaticamente (comportamento padrão do controller do `ApplicationSet`,
+`preserveResourcesOnDeletion: false`) — por isso o teste de teardown do
+`spoke-03` na feature 003 (que não tinha nenhuma entrada em
+`charts:`/`compositions:`) não tinha como expor esse problema. Corrigido
+adicionando o finalizer explicitamente nos dois templates; as duas claims
+órfãs foram removidas à mão desta vez.
+
+**Também descoberto nesta mesma sessão de trabalho, sem relação direta**: um
+`git add` com um pathspec de um diretório já removido (`git rm`) na mesma
+invocação aborta o comando inteiro sem stagear nenhum dos outros caminhos
+listados — já tinha acontecido antes neste projeto (ver histórico) e
+aconteceu de novo aqui, fazendo um commit (`9e1e52d`) sair sem três arquivos
+que deveriam estar nele. Corrigido com um commit de acompanhamento
+(`6a482ff`). Padrão a evitar: nunca misturar um caminho já removido com
+caminhos que ainda precisam ser adicionados na mesma chamada de `git add`.
+
+**Status**: Aceito. `crossplane-compositions-advanced`,
+`dataplane-spoke-01-adv-01`, `dataplane-spoke-02-adv-03` confirmados
+inexistentes; `adv-01`/`adv-03` confirmados removidos do cluster; XRD
+`xdataplaneadvanceds.lab.example.org` continua instalada (Crossplane não
+remove XRDs automaticamente quando a Composition/chart que as instalou é
+removido do Git — não é um problema de verdade, só um detalhe: a XRD fica
+"sem Composition" até algo a reinstalar ou removê-la à mão).
+
+---
+
+### ADR-032: `dataplane-addons` — app-of-apps instalado em todo spoke via `clusters` generator
+
+**Decisão**: um segundo `ApplicationSet`, `dataplane-addons`
+(`gitops/apps/dataplane-addons-appset.yaml`), instala cada chart em
+`addons/<nome>/` em **todo** spoke registrado no ArgoCD — sem edição manual
+por spoke, diferente do padrão `dataplanes/<spoke>.yaml`. Dois addons de
+exemplo: `prometheus` (servidor + UI) e `external-dns` (observa `Ingress`,
+provider `inmemory`).
+
+**Contexto**: pedido explícito do operador — "crie outro app of apps,
+chamado de dataplane-addons que deve ser deployado em todos os dataplanes
+(use o cluster generator para atingir isso)", com dois addons de exemplo
+especificados: Prometheus com UI, e external-dns criando um domínio
+`prometheus.<spoke-xx>.127-0-0-1.nip.io`.
+
+**Desenho**: gerador `matrix` combinando `clusters` (filtrado por
+`selector.matchLabels: lab.example.org/role: dataplane` — sem esse filtro o
+gerador `clusters` também traria o `in-cluster` implícito, o próprio hub,
+onde nenhum addon de spoke faz sentido) com um gerador `git` `directories`
+sobre `addons/*`. O produto cartesiano gera uma `Application` por
+(spoke × addon), cada uma com `destination.name: <spoke>` — mesmo mecanismo
+`destination.name` que as entradas `charts:` de `dataplanes/<spoke>.yaml` já
+usam, só que disparado automaticamente para todo spoke.
+
+**O label extra precisou ser criado**: `scripts/16-register-argocd-clusters.sh`
+já rotulava o Secret do Cluster com `argocd.argoproj.io/secret-type: cluster`
+(exigido pelo próprio ArgoCD), mas nada distinguia um spoke do `in-cluster`
+implícito para fins de seleção por um gerador `clusters`. Adicionado
+`lab.example.org/role: dataplane`, aplicado pelo mesmo script.
+
+**O domínio `prometheus.<spoke>.127-0-0-1.nip.io` exigiu uma mudança
+estrutural, descoberta e verificada ao vivo, não assumida**: um `Ingress`
+criado dentro de um spoke (vcluster) não tem efeito nenhum por padrão —
+nenhum controller de ingress roda dentro de um vcluster, e o chart do
+vcluster (`compositions/dataplane-cluster`) tem `sync.toHost.ingresses.enabled:
+false` por padrão (confirmado lendo a config ao vivo do vcluster antes de
+supor qualquer coisa). Ligado para `true` nos values do chart — a partir daí,
+um `Ingress` criado dentro do spoke é espelhado para o hub com um nome
+traduzido (`<ingress>-x-<namespace>-x-<spoke>`), onde o Traefik e o
+cert-manager reais do hub (nenhum dos dois roda dentro de um spoke) agem
+sobre a cópia sincronizada. Confirmado com um teste manual completo antes de
+escrever qualquer addon: `Deployment`+`Service`+`Ingress` descartáveis dentro
+de `spoke-01` → HTTP 200 pelo hostname nip.io; depois anotações de
+cert-manager adicionadas ao mesmo `Ingress` → certificado emitido pela
+`lab-ca-issuer` (nome também traduzido) → HTTPS 200. Só depois desse teste
+os charts `addons/prometheus` e `addons/external-dns` foram escritos.
+
+**`external-dns` e o domínio nip.io**: nip.io já resolve qualquer subdomínio
+sob `127-0-0-1.nip.io` para `127.0.0.1` sozinho — não existe nenhum registro
+de DNS real para criar ou gerenciar aqui. O addon usa o provider `inmemory`
+(o provider oficial de testes/demonstração do próprio projeto external-dns),
+que mantém os registros calculados em memória e loga cada reconciliação —
+demonstra o padrão (observar `Ingress`, calcular o registro desejado,
+"publicá-lo") sem um backend de DNS real por trás, que de qualquer forma
+seria supérfluo aqui. Confirmado funcionando via log do pod:
+`CREATE: prometheus.spoke-01.127-0-0-1.nip.io 0 IN A 172.19.0.2 []` — o
+`Ingress` do addon `prometheus` sendo descoberto corretamente de dentro do
+próprio spoke.
+
+**Erro real pego testando**: a imagem `external-dns:v0.23.0` recusou subir —
+`config validation failed: --policy must be set explicitly (one of: sync,
+upsert-only, create-only)`. Versões mais novas do external-dns exigem
+`--policy` explícito (não teria como saber sem rodar de verdade e ler o
+log). Corrigido com `--policy=sync`.
+
+**Status**: Aceito, verificado de ponta a ponta: as 4 Applications
+(`dataplane-addons-spoke-01-prometheus`, `-external-dns`,
+`dataplane-addons-spoke-02-prometheus`, `-external-dns`) `Synced`/`Healthy`;
+`https://prometheus.spoke-01.127-0-0-1.nip.io` e
+`https://prometheus.spoke-02.127-0-0-1.nip.io` respondendo `200` via HTTPS
+com certificado real; `external-dns` confirmado reconciliando via log, não
+só `Running`.
+
+---
+
 ## Resumo de decisões superadas ou com incidente associado
 
 | ADR | O que mudou | Por quê |
@@ -966,3 +1096,5 @@ removidos, com o gap do namespace documentado acima).
 | ADR-028 | `ApplicationSet`+Helm `lookup` descartado → script clonando o repo | `helm template` do repo-server do ArgoCD não tem acesso ao cluster |
 | ADR-029 | Pasta-por-instância + `clusters/` → um arquivo `dataplanes/<spoke>.yaml` | Pedido explícito do operador (charts + compositions por cluster) |
 | ADR-030 | Spokes k3d reais → vclusters dentro do hub; `XDataPlane`/`DataPlane` da feature 001 removida e reaproveitada | Pedido explícito do operador; nome reaproveitado só depois de confirmar com ele |
+| ADR-031 | `dataplane-advanced` removida por completo (chart, claims, Application) | Pedido explícito do operador, sem defeito técnico |
+| ADR-032 | Novo `ApplicationSet` `dataplane-addons` (cluster generator), 2 addons de exemplo | Pedido explícito do operador |
