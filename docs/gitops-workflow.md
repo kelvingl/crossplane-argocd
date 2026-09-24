@@ -43,12 +43,13 @@ A árvore app-of-apps (`gitops/apps/*.yaml`, descoberta por
   `ministack.ministack.svc.cluster.local:4566`.
 - **wave `"2"`**: `crossplane-config` (os `ProviderConfig`s, que referenciam
   providers instalados na wave 1), `argocd-networking` (Ingress/TLS —
-  independente das outras, mas mantido na wave mais alta por convenção), e o
-  `ApplicationSet` `dataplanes` (precisa que as XRDs `XDataPlane` e
-  `XDataPlaneAdvanced` já existam no cluster — o que só acontece depois que
-  `crossplane-compositions`/`crossplane-compositions-advanced` da wave 1
-  sincronizaram — já que o chart que ele dispara emite tanto a claim
-  `DataPlane` quanto, quando declarado, um claim `AdvancedDataPlane`).
+  independente das outras, mas mantido na wave mais alta por convenção), o
+  `ApplicationSet` `dataplanes` (precisa que a XRD `XDataPlane` já exista no
+  cluster — o que só acontece depois que `crossplane-compositions` da wave 1
+  sincronizou, já que o chart que ele dispara sempre emite a claim
+  `DataPlane`), e o `ApplicationSet` `dataplane-addons` (precisa que pelo
+  menos um spoke já esteja registrado no ArgoCD — o gerador `clusters` não
+  produz nada até então).
 
 Regra geral usada neste repo (Constitution Principle III): a sync-wave de uma
 Application reflete a ordem de dependência real, nunca uma preferência
@@ -70,10 +71,8 @@ charts:            # Helm charts aplicados DIRETO no spoke
   - name: hello
     chart: charts/hello
     values: { replicas: 1 }
-compositions:      # claims de Composition, aplicadas no hub
-  - name: adv-01
-    composition: dataplane-advanced
-    values: { image: nginxdemos/hello, replicas: 1, config: { greeting: hello-from-adv-01 } }
+compositions: []   # claims de Composition, aplicadas no hub (nenhuma
+                    # composition com instance-chart disponível no momento)
 ```
 
 Para cada arquivo, o `ApplicationSet` gera **uma Application "wrapper"**
@@ -113,8 +112,10 @@ parametrizado por dados vindos do Git em vez de arquivos fixos:
 - entradas de **`compositions`**: `destination.server` é sempre o hub — o
   Crossplane só roda lá. Fonte: este repositório (`platform`), resolvida a
   partir do nome da composition via um mapa fixo em
-  `charts/dataplane-cluster/templates/_helpers.tpl` (hoje só
-  `dataplane-advanced` → `compositions/dataplane-advanced/instance-chart`).
+  `charts/dataplane-cluster/templates/_helpers.tpl` — nenhuma composition
+  mapeada no momento (a única que já esteve, `dataplane-advanced`, foi
+  removida; qualquer entrada em `compositions:` falha explicitamente até uma
+  nova composition com instance-chart ser adicionada ao mapa).
   O parâmetro `spoke` é injetado automaticamente a partir de `cluster:`.
 
 **Fluxo ponta a ponta para provisionar um spoke novo do zero**:
@@ -133,10 +134,11 @@ parametrizado por dados vindos do Git em vez de arquivos fixos:
    (ProviderConfig + Cluster do ArgoCD) — passo manual, uma vez por spoke
 7a. Application filha de "charts": Helm chart aplicado direto no spoke
     (destination.name), sem Crossplane
-7b. Application filha de "compositions": renderiza um claim (ex.:
-    AdvancedDataPlane) no hub; a Composition (função Go) compõe os
-    recursos reais como Objects do provider-kubernetes; provider-kubernetes
-    aplica esses Objects no spoke indicado em "cluster:"
+7b. Application filha de "compositions": renderiza um claim de uma
+    composition mapeada em _helpers.tpl (nenhuma no momento) no hub; a
+    Composition compõe os recursos reais como Objects do
+    provider-kubernetes; provider-kubernetes aplica esses Objects no
+    spoke indicado em "cluster:"
 ```
 
 **Remover** uma entrada de `charts`/`compositions` remove só aquilo: a
@@ -172,41 +174,59 @@ kubectl --context k3d-hub -n argocd rollout restart deployment/argocd-repo-serve
 (ver `docs/decisions.md`, ADR-021 e ADR-023, para o porquê e para o efeito
 colateral real que reiniciar o Redis isoladamente já causou uma vez).
 
+## O padrão `ApplicationSet` para `addons/` (instalado em todo spoke)
+
+Diferente do padrão acima (um arquivo `dataplanes/<spoke>.yaml` editado por
+spoke), o `ApplicationSet` `dataplane-addons`
+(`gitops/apps/dataplane-addons-appset.yaml`) instala cada chart em
+`addons/<nome>/` em **todo** spoke registrado no ArgoCD, sem nenhuma edição
+por spoke. Usa um gerador `matrix` combinando:
+
+1. `clusters`, com `selector.matchLabels: lab.example.org/role: dataplane` —
+   sem esse filtro o gerador também traria o `in-cluster` implícito (o
+   hub), onde nenhum addon de spoke faz sentido. O label é aplicado pelo
+   mesmo `scripts/16-register-argocd-clusters.sh` que já cria o Secret do
+   Cluster.
+2. `git` `directories` sobre `addons/*`.
+
+O produto cartesiano dos dois gera uma `Application`
+(`dataplane-addons-<spoke>-<addon>`) por combinação, cada uma com
+`destination.name: <spoke>` e `helm.valuesObject: {spoke: <spoke>}` — o
+mesmo mecanismo `destination.name` que as entradas `charts:` já usam, só que
+disparado automaticamente para todo spoke em vez de precisar de uma entrada
+manual por spoke.
+
+**Consequência prática**: adicionar `addons/<nome-novo>/` (um chart Helm
+válido) faz com que ele apareça em todo spoke — existente ou futuro — no
+próximo sync, sem tocar no `ApplicationSet` nem em nenhum
+`dataplanes/<spoke>.yaml`. Remover a pasta remove o addon de todo spoke.
+
+Um addon cujo `Ingress` precisa ser alcançável de fora do cluster (caso do
+addon de exemplo `prometheus`) depende de `compositions/dataplane-cluster`
+ligar `sync.toHost.ingresses: true` nos values do chart do vcluster — sem
+isso, um `Ingress` criado dentro de um spoke não tem efeito nenhum (nenhum
+controller de ingress roda dentro de um vcluster). Confirmado com um teste
+manual (Deployment+Service+Ingress descartáveis dentro de `spoke-01`) antes
+de qualquer addon existir: HTTP 200, depois HTTPS 200 com certificado
+emitido pela `lab-ca-issuer` — o mesmo cert-manager/Traefik do hub, nunca
+duplicado dentro do spoke.
+
 ## Fluxo de release de uma Composition (Makefile-driven)
 
 Cada Composition em `compositions/<nome>/` expõe o mesmo alvo de Makefile:
 `dev`, `build`, `push`, `test`, `clean`. O `Makefile` da raiz do repo itera
-sobre `COMPOSITIONS := dataplane-cluster dataplane-advanced s3-bucket`.
+sobre `COMPOSITIONS := dataplane-cluster s3-bucket` — nenhuma das duas tem
+imagem para publicar hoje (a única que tinha, `dataplane-advanced`, foi
+removida junto com seu Go function-sdk-go/Dockerfile/xpkg build).
 
-**Compositions sem imagem** (`dataplane-cluster`, `s3-bucket`):
+**Ambas** (`dataplane-cluster`, `s3-bucket`):
 - `dev`/`build`: `helm lint` + `helm template` do chart (nenhuma imagem
   envolvida — `push` é um no-op).
 - `test`: aplica um claim de exemplo contra o cluster real, espera
   `Ready`, confirma o estado, remove.
 
-**`dataplane-advanced`** (com imagem da Function):
-- `make dev` (ou `make -C compositions/dataplane-advanced dev`): `go
-  vet`/`go build` só do código Go — feedback mais rápido enquanto se edita
-  `fn.go`, sem Docker.
-- `make build`: builda a imagem runtime (`docker build`), empacota como
-  Crossplane xpkg (`crossplane xpkg build --embed-runtime-image=...`) e
-  valida (`helm lint`/`template`) os dois charts (`chart/` e
-  `instance-chart/`).
-- `make push` (ou `make release-dataplane-advanced` = build + push):
-  publica o xpkg no registry privado (`crossplane xpkg push
-  --insecure-skip-tls-verify`).
-- Depois de publicar uma nova tag, o `values.yaml` do chart
-  (`compositions/dataplane-advanced/chart/values.yaml`) precisa ser
-  atualizado com a nova tag e o commit/push feito para o `gogs` — só então o
-  ArgoCD atualiza o recurso `Function` via sync Helm (é assim que a US2 da
-  feature 002 foi de fato verificada: a correção real de `v0.1.0` →
-  `v0.1.1`, não uma demonstração).
-- `make test`: instala um claim descartável via `instance-chart`, espera
-  `Ready`, desinstala — exige a Application
-  `crossplane-compositions-advanced` já sincronizada e a imagem já publicada.
-
 **Atalhos na raiz do repo**: `make build-all`/`push-all`/`release-all`/
-`test-all`/`dev-all`/`clean-all` fazem fan-out sobre as três Compositions;
+`test-all`/`dev-all`/`clean-all` fazem fan-out sobre as duas Compositions;
 `make build-<nome>`, `make test-<nome>`, etc. rodam um alvo único; `make
 release-<nome>` é `build-<nome>` seguido de `push-<nome>`.
 
@@ -216,7 +236,7 @@ release-<nome>` é `build-<nome>` seguido de `push-<nome>`.
    `ApplicationSet` referencia (`gitops/apps/*.yaml` lista `source.path` ou
    `sources[].path` de cada uma)?
 2. O commit foi enviado para o remote `gogs` (não só `origin`)?
-3. Se for uma Composition com imagem (`dataplane-advanced`): a imagem nova
+3. Se for uma Composition com imagem: a imagem nova
    foi publicada no registry (`make push`/`release-<nome>`) **antes** de o
    `values.yaml` do chart referenciar a nova tag?
 4. Se for uma instância de dataplane avançado: o diretório está no repo
