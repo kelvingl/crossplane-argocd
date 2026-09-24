@@ -1,0 +1,15 @@
+# O Secret "vc-spoke-03" é gerado em tempo de execução pelo próprio chart
+# do vcluster (compositions/dataplane-cluster), no namespace "spoke-03".
+apiVersion: kubernetes.crossplane.io/v1alpha1
+kind: ProviderConfig
+metadata:
+  name: spoke-03
+  labels:
+    lab.example.org/dataplane: spoke-03
+spec:
+  credentials:
+    source: Secret
+    secretRef:
+      namespace: spoke-03
+      name: vc-spoke-03
+      key: config

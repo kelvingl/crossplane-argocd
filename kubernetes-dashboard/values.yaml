@@ -1,0 +1,5 @@
+# spoke: preenchido automaticamente pelo ApplicationSet "dataplane-dashboard"
+# — usado para montar o hostname dashboard.<spoke>.127-0-0-1.nip.io.
+spoke: ""
+
+image: kubernetesui/dashboard:v2.7.0

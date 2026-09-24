@@ -31,7 +31,9 @@
 # "argocd.argoproj.io/secret-type=cluster" que o ArgoCD exige) é o que o
 # ApplicationSet "dataplane-addons" (gerador `clusters`) usa para selecionar
 # só os spokes — sem ele, o gerador `clusters` também incluiria o
-# `in-cluster` implícito (o próprio hub).
+# `in-cluster` implícito (o próprio hub). "lab.example.org/name=<spoke>"
+# identifica cada spoke individualmente — é o que um ApplicationSet
+# filtrado a UM spoke específico usa (ex. "dataplane-dashboard").
 set -euo pipefail
 
 GOGS_ADMIN_USER="gitadmin"
@@ -92,6 +94,7 @@ register_cluster() {
   | kubectl --context k3d-hub label --local -f - \
       argocd.argoproj.io/secret-type=cluster \
       lab.example.org/role=dataplane \
+      "lab.example.org/name=${spoke}" \
       -o yaml \
   | kubectl --context k3d-hub apply -f -
 }

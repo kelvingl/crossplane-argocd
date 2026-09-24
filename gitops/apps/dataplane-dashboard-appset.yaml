@@ -1,0 +1,50 @@
+# App-of-apps separado de "dataplane-addons": instala o Kubernetes
+# Dashboard (sem autenticação) SÓ no spoke filtrado abaixo, não em todo
+# spoke. Por isso o chart fica fora de addons/ (que o ApplicationSet
+# "dataplane-addons" instala em TODO spoke via addons/*) — vive em
+# kubernetes-dashboard/ na raiz do repo.
+#
+# O filtro é feito pelo próprio gerador `clusters`, via
+# "lab.example.org/name: spoke-03" — label que
+# scripts/16-register-argocd-clusters.sh aplica a cada Secret de Cluster.
+# Trocar de spoke = trocar esse valor.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: dataplane-dashboard
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  generators:
+    - clusters:
+        selector:
+          matchLabels:
+            lab.example.org/name: spoke-03
+  template:
+    metadata:
+      name: "dataplane-dashboard-{{name}}"
+      namespace: argocd
+      annotations:
+        argocd.argoproj.io/sync-wave: "2"
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io
+    spec:
+      project: default
+      source:
+        repoURL: http://gogs.gogs.svc.cluster.local:3000/gitadmin/platform.git
+        targetRevision: main
+        path: kubernetes-dashboard
+        helm:
+          releaseName: kubernetes-dashboard
+          valuesObject:
+            spoke: "{{name}}"
+      destination:
+        name: "{{name}}"
+        namespace: kubernetes-dashboard
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true

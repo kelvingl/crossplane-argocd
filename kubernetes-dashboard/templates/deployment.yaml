@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubernetes-dashboard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kubernetes-dashboard
+  template:
+    metadata:
+      labels:
+        app: kubernetes-dashboard
+    spec:
+      serviceAccountName: kubernetes-dashboard
+      containers:
+        - name: kubernetes-dashboard
+          image: {{ .Values.image }}
+          args:
+            # Sem autenticação, de propósito (pedido explícito do operador):
+            # --insecure-bind-address=0.0.0.0 é obrigatório para o Service
+            # sequer alcançar a porta insegura (o default é 127.0.0.1,
+            # loopback-only). --enable-skip-login mostra o botão "Skip" na
+            # tela de login; sem credencial nenhuma, o backend usa a
+            # identidade da própria ServiceAccount do pod (cluster-admin,
+            # ver rbac.yaml). --disable-settings-authorizer evita exigir
+            # login só para abrir a página de Settings.
+            - --insecure-bind-address=0.0.0.0
+            - --insecure-port=9090
+            - --enable-skip-login
+            - --enable-insecure-login
+            - --disable-settings-authorizer
+          ports:
+            - containerPort: 9090
+          volumeMounts:
+            - name: tmp-volume
+              mountPath: /tmp
+      volumes:
+        - name: tmp-volume
+          emptyDir: {}

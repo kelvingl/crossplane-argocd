@@ -1,0 +1,26 @@
+{{- if not .Values.spoke }}
+{{- fail "values.spoke é obrigatório (injetado pelo ApplicationSet dataplane-dashboard)" }}
+{{- end }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kubernetes-dashboard
+---
+# cluster-admin de propósito: "sem autenticação" (pedido explícito do
+# operador) via --enable-skip-login (ver deployment.yaml) só funciona de
+# verdade se a identidade usada quando ninguém apresenta credencial (a
+# ServiceAccount do próprio pod) já tiver acesso total — caso contrário o
+# botão "Skip" leva a uma UI vazia/negada. Aceitável aqui: lab local, sem
+# exposição fora do hub.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kubernetes-dashboard
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: kubernetes-dashboard
+    namespace: {{ .Release.Namespace }}

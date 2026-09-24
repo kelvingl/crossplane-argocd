@@ -1,0 +1,28 @@
+# Mesmo mecanismo dos outros addons (ver addons/prometheus/templates/
+# ingress.yaml): este Ingress é criado DENTRO do spoke; só fica alcançável
+# de fora porque o chart do vcluster liga sync.toHost.ingresses — o objeto é
+# espelhado para o hub, onde o Traefik/cert-manager reais o veem.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kubernetes-dashboard
+  annotations:
+    cert-manager.io/cluster-issuer: "lab-ca-issuer"
+    traefik.ingress.kubernetes.io/router.tls: "true"
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - "dashboard.{{ .Values.spoke }}.127-0-0-1.nip.io"
+      secretName: kubernetes-dashboard-tls
+  rules:
+    - host: "dashboard.{{ .Values.spoke }}.127-0-0-1.nip.io"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: kubernetes-dashboard
+                port:
+                  number: 9090
