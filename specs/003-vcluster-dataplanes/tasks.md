@@ -34,9 +34,9 @@ creating and destroying a demo spoke twice).
 
 **Purpose**: Scaffolding for all new artifacts, no cluster changes yet.
 
-- [ ] T001 [P] Create `compositions/dataplane-cluster/chart/templates/` directory with a `Chart.yaml` stub (`apiVersion: v2`, `type: application`) — replaces `compositions/dataplane-baseline/`
-- [ ] T002 [P] Create `compositions/dataplane-cluster/examples/` directory for a manual-test claim
-- [ ] T003 [P] Create `crossplane/providers/provider-helm.yaml` and `crossplane/config/providerconfig-helm-hub.yaml` as empty files to be filled in Phase 2
+- [x] T001 [P] Create `compositions/dataplane-cluster/chart/templates/` directory with a `Chart.yaml` stub (`apiVersion: v2`, `type: application`) — replaces `compositions/dataplane-baseline/`
+- [x] T002 [P] Create `compositions/dataplane-cluster/examples/` directory for a manual-test claim
+- [x] T003 [P] Create `crossplane/providers/provider-helm.yaml` and `crossplane/config/providerconfig-helm-hub.yaml` as empty files to be filled in Phase 2
 
 **Checkpoint**: Directory scaffolding exists; nothing deployed yet.
 
@@ -50,19 +50,19 @@ any user story can be demonstrated.
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete.
 
-- [ ] T004 Write `crossplane/providers/provider-helm.yaml`: `Provider` package (`xpkg.upbound.io/crossplane-contrib/provider-helm`, pin a current stable version) plus an aggregated `ClusterRole` (label `rbac.crossplane.io/aggregate-to-crossplane: "true"`, same mechanism as `provider-kubernetes-secrets`) granting the permissions the vcluster chart's resources need (`apps`, `core`, `rbac.authorization.k8s.io` at minimum — finalize exact rule list empirically per research.md #5) and a `ClusterRoleBinding` giving `provider-helm`'s own ServiceAccount that role (for `InjectedIdentity` to work, the provider's SA itself needs these permissions, not just an aggregated role visible to it — verify which is actually required during implementation)
-- [ ] T005 Write `crossplane/config/providerconfig-helm-hub.yaml`: `ProviderConfig` (`helm.crossplane.io/v1beta1`), `credentials.source: InjectedIdentity`
-- [ ] T006 Sync `crossplane-providers`; verify `provider-helm` reports `INSTALLED: True, HEALTHY: True` (`kubectl --context k3d-hub get provider.pkg.crossplane.io provider-helm`)
-- [ ] T007 Sync `crossplane-config`; verify `kubectl --context k3d-hub get providerconfig.helm.crossplane.io hub` exists
-- [ ] T008 Write `compositions/dataplane-cluster/chart/templates/xrd-dataplane.yaml`: `CompositeResourceDefinition` `xdataplanes.lab.example.org`, `names.kind: XDataPlane`, `claimNames.kind: DataPlane` (same names as feature 001's retired XRD — see contracts/dataplane-claim.md for the schema: `spec.parameters.kubernetesVersion` optional, no required parameters)
-- [ ] T009 Write `compositions/dataplane-cluster/chart/templates/composition-dataplane-cluster.yaml`: classic Patch-and-Transform `Composition` composing one `helm.crossplane.io/v1beta1` `Release` — chart repo/name/version from `values.yaml`, release name and namespace both patched from the claim's `metadata.name`, values overriding `exportKubeConfig.server` to `https://<name>.<name>.svc.cluster.local:443` (research.md #2), and `kubernetesVersion` patched through only when `spec.parameters.kubernetesVersion` is set
-- [ ] T010 Write `compositions/dataplane-cluster/chart/values.yaml` (default vcluster chart repo URL + version)
-- [ ] T011 Write `compositions/dataplane-cluster/examples/claim-dataplane.yaml` (a minimal `DataPlane` claim, name `dataplane-cluster-test`, for `make test`) and `compositions/dataplane-cluster/Makefile` (dev/build/push/test, same shape as the other Compositions' Makefiles — `push`/`build` are Helm-lint/template no-ops here, no image involved)
-- [ ] T012 Delete `compositions/dataplane-baseline/` entirely (chart, Makefile) and its `crossplane/examples/claim-dataplane-spoke-01.yaml`/`claim-dataplane-spoke-02.yaml` — feature 001's baseline meaning is retired per FR-001
-- [ ] T013 Update `gitops/apps/crossplane-compositions.yaml`: `path: compositions/dataplane-cluster/chart` (was `compositions/dataplane-baseline/chart`)
-- [ ] T014 Update root `Makefile`'s `COMPOSITIONS :=` list: replace `dataplane-baseline` with `dataplane-cluster`
-- [ ] T015 Sync `crossplane-compositions`; verify `Synced`/`Healthy` and `kubectl --context k3d-hub get xrd xdataplanes.lab.example.org` exists with `claimNames.kind: DataPlane`
-- [ ] T016 Apply `compositions/dataplane-cluster/examples/claim-dataplane.yaml` directly (`kubectl apply`, not yet via Git/ArgoCD) as a first smoke test; confirm it reaches `Ready` and a `Release` exists (`kubectl --context k3d-hub get release.helm.crossplane.io dataplane-cluster-test`); then delete it — this is the Foundational-phase proof the mechanism works at all, before wiring it into the `dataplanes` repo flow in US1
+- [x] T004 Write `crossplane/providers/provider-helm.yaml`: `Provider` package (`xpkg.upbound.io/crossplane-contrib/provider-helm`, pin a current stable version) plus an aggregated `ClusterRole` (label `rbac.crossplane.io/aggregate-to-crossplane: "true"`, same mechanism as `provider-kubernetes-secrets`) granting the permissions the vcluster chart's resources need (`apps`, `core`, `rbac.authorization.k8s.io` at minimum — finalize exact rule list empirically per research.md #5) and a `ClusterRoleBinding` giving `provider-helm`'s own ServiceAccount that role (for `InjectedIdentity` to work, the provider's SA itself needs these permissions, not just an aggregated role visible to it — verify which is actually required during implementation)
+- [x] T005 Write `crossplane/config/providerconfig-helm-hub.yaml`: `ProviderConfig` (`helm.crossplane.io/v1beta1`), `credentials.source: InjectedIdentity`
+- [x] T006 Sync `crossplane-providers`; verify `provider-helm` reports `INSTALLED: True, HEALTHY: True` (`kubectl --context k3d-hub get provider.pkg.crossplane.io provider-helm`)
+- [x] T007 Sync `crossplane-config`; verify `kubectl --context k3d-hub get providerconfig.helm.crossplane.io hub` exists
+- [x] T008 Write `compositions/dataplane-cluster/chart/templates/xrd-dataplane.yaml`: `CompositeResourceDefinition` `xdataplanes.lab.example.org`, `names.kind: XDataPlane`, `claimNames.kind: DataPlane` (same names as feature 001's retired XRD — see contracts/dataplane-claim.md for the schema: `spec.parameters.kubernetesVersion` optional, no required parameters)
+- [x] T009 Write `compositions/dataplane-cluster/chart/templates/composition-dataplane-cluster.yaml`: classic Patch-and-Transform `Composition` composing one `helm.crossplane.io/v1beta1` `Release` — chart repo/name/version from `values.yaml`, release name and namespace both patched from the claim's `metadata.name`, values overriding `exportKubeConfig.server` to `https://<name>.<name>.svc.cluster.local:443` (research.md #2), and `kubernetesVersion` patched through only when `spec.parameters.kubernetesVersion` is set
+- [x] T010 Write `compositions/dataplane-cluster/chart/values.yaml` (default vcluster chart repo URL + version)
+- [x] T011 Write `compositions/dataplane-cluster/examples/claim-dataplane.yaml` (a minimal `DataPlane` claim, name `dataplane-cluster-test`, for `make test`) and `compositions/dataplane-cluster/Makefile` (dev/build/push/test, same shape as the other Compositions' Makefiles — `push`/`build` are Helm-lint/template no-ops here, no image involved)
+- [x] T012 Delete `compositions/dataplane-baseline/` entirely (chart, Makefile) and its `crossplane/examples/claim-dataplane-spoke-01.yaml`/`claim-dataplane-spoke-02.yaml` — feature 001's baseline meaning is retired per FR-001
+- [x] T013 Update `gitops/apps/crossplane-compositions.yaml`: `path: compositions/dataplane-cluster/chart` (was `compositions/dataplane-baseline/chart`)
+- [x] T014 Update root `Makefile`'s `COMPOSITIONS :=` list: replace `dataplane-baseline` with `dataplane-cluster`
+- [x] T015 Sync `crossplane-compositions`; verify `Synced`/`Healthy` and `kubectl --context k3d-hub get xrd xdataplanes.lab.example.org` exists with `claimNames.kind: DataPlane`
+- [x] T016 Apply `compositions/dataplane-cluster/examples/claim-dataplane.yaml` directly (`kubectl apply`, not yet via Git/ArgoCD) as a first smoke test; confirm it reaches `Ready` and a `Release` exists (`kubectl --context k3d-hub get release.helm.crossplane.io dataplane-cluster-test`); then delete it — this is the Foundational-phase proof the mechanism works at all, before wiring it into the `dataplanes` repo flow in US1
 
 **Checkpoint**: A `DataPlane` claim applied by hand produces a working vcluster. No Git-driven flow yet.
 
