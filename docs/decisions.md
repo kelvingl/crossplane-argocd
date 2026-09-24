@@ -1081,6 +1081,69 @@ só `Running`.
 
 ---
 
+### ADR-033: terceiro spoke (`spoke-03`) e `dataplane-dashboard` — app-of-apps filtrado a um único spoke
+
+**Decisão**: `spoke-03` criado como um dataplane permanente (não descartável
+como nos testes da feature 003). Um terceiro `ApplicationSet`,
+`dataplane-dashboard`, instala o Kubernetes Dashboard **sem autenticação**
+só nele — usando o gerador `clusters` filtrado por um label específico do
+spoke, não o padrão "todo spoke" do `dataplane-addons`.
+
+**Contexto**: pedido explícito do operador — "crie um terceiro spoke, e
+também um outro app-of-apps que vai deployar nos dataplanes. ele vai
+instalar o kubernetes dashboard (sem autenticação). esse app of apps teve
+ter um filtro nos clusters pra instalar só nesse terceiro spoke".
+
+**Como o filtro por UM spoke específico foi resolvido**: o
+`dataplane-addons` (ADR-032) já filtrava o gerador `clusters` por
+`lab.example.org/role: dataplane` (todo spoke, exclui o `in-cluster`) — não
+suficiente aqui, precisava identificar UM spoke entre vários. Adicionado um
+segundo label, `lab.example.org/name: <spoke>` (nome do próprio spoke),
+aplicado por `scripts/16-register-argocd-clusters.sh` a cada Secret de
+Cluster — reutilizável por qualquer `ApplicationSet` futuro que precise
+mirar um spoke específico, não uma propriedade one-off. O `ApplicationSet`
+`dataplane-dashboard` usa `selector.matchLabels: lab.example.org/name:
+spoke-03` sozinho (sem `matrix` com um gerador `git`, já que não há um
+catálogo de addons aqui — só um chart), gerando exatamente uma
+`Application` mesmo com três spokes registrados — confirmado, não
+assumido.
+
+**Por que o chart não vive em `addons/`**: `dataplane-addons` já processa
+TODO diretório em `addons/*` para TODO spoke com o label `role: dataplane`
+— colocar o dashboard lá o instalaria em todo spoke, contradizendo o pedido
+explícito de "só nesse terceiro spoke". O chart foi colocado num diretório
+de topo próprio, `kubernetes-dashboard/`, fora do alcance do gerador
+`addons/*`.
+
+**Dois erros reais pegos rodando de verdade, não hipotéticos** (Kubernetes
+Dashboard v2.7.0, escolhido em vez da arquitetura v7.x atual — confirmado
+via GitHub releases que a v7 é multi-componente com `auth`/`api`/`web`
+separados e sem um toggle documentado de "sem login"; a v2.x tem
+`--enable-skip-login`, documentado e real):
+1. O container entrou em `panic` na inicialização:
+   `secrets "kubernetes-dashboard-csrf" not found`. O manifest oficial
+   (`aio/deploy/recommended.yaml`) pré-cria três Secrets vazios
+   (`kubernetes-dashboard-certs`, `-csrf`, `-key-holder`) que o Dashboard
+   escreve em runtime, mas não cria do zero — copiados para o chart.
+2. Mesmo depois do primeiro fix, o Dashboard continuava procurando esses
+   Secrets no namespace errado: o flag `--namespace` tem default
+   `kube-system` (onde o manifest oficial de fato o instala), não o
+   namespace onde este chart de fato roda. Corrigido com
+   `--namespace={{ .Release.Namespace }}` explícito.
+
+**Status**: Aceito, verificado de ponta a ponta: `spoke-03` com `DataPlane`
+claim `Ready`; `dataplane-addons` confirmado instalando `prometheus`/
+`external-dns` automaticamente nele também (sem nenhuma ação extra, prova
+de que o padrão "todo spoke" da ADR-032 escala para um spoke novo);
+`dataplane-dashboard-spoke-03` `Synced`/`Healthy`, com
+`GET https://dashboard.spoke-03.127-0-0-1.nip.io/api/v1/namespace` (zero
+headers de autenticação) retornando a lista real de namespaces; confirmado
+que `dashboard.spoke-01.127-0-0-1.nip.io` retorna 404 e nenhum pod do
+dashboard existe em `spoke-01`/`spoke-02` — o filtro por spoke funciona nos
+dois sentidos.
+
+---
+
 ## Resumo de decisões superadas ou com incidente associado
 
 | ADR | O que mudou | Por quê |
@@ -1098,3 +1161,4 @@ só `Running`.
 | ADR-030 | Spokes k3d reais → vclusters dentro do hub; `XDataPlane`/`DataPlane` da feature 001 removida e reaproveitada | Pedido explícito do operador; nome reaproveitado só depois de confirmar com ele |
 | ADR-031 | `dataplane-advanced` removida por completo (chart, claims, Application) | Pedido explícito do operador, sem defeito técnico |
 | ADR-032 | Novo `ApplicationSet` `dataplane-addons` (cluster generator), 2 addons de exemplo | Pedido explícito do operador |
+| ADR-033 | `spoke-03` + `ApplicationSet` `dataplane-dashboard` filtrado a um spoke só | Pedido explícito do operador |

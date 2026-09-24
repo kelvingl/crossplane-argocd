@@ -170,6 +170,37 @@ Confirmado com um teste manual antes de qualquer addon existir: um
 `Deployment`+`Service`+`Ingress` de teste dentro de `spoke-01`, HTTP 200,
 depois HTTPS 200 com certificado emitido pela `lab-ca-issuer`.
 
+## `dataplane-dashboard`: app-of-apps filtrado a UM spoke
+
+Nem todo app-of-apps precisa ter alvo "todo spoke". `dataplane-dashboard`
+(`gitops/apps/dataplane-dashboard-appset.yaml`) usa o mesmo gerador
+`clusters` do `dataplane-addons`, mas SEM o gerador `git` `directories` ao
+lado (não é um `matrix`, é um gerador `clusters` só) — e com
+`selector.matchLabels: lab.example.org/name: spoke-03` em vez de
+`lab.example.org/role: dataplane`. Resultado: exatamente uma `Application`
+(`dataplane-dashboard-spoke-03`), mesmo com três spokes registrados.
+
+Instala o **Kubernetes Dashboard v2.7.0 sem autenticação** —
+`kubernetes-dashboard/` na raiz do repo (fora de `addons/` de propósito, para
+não ser pego pelo gerador `addons/*` do `dataplane-addons` e acabar instalado
+em todo spoke). "Sem autenticação" é uma combinação de três coisas:
+`--enable-skip-login` (mostra o botão "Skip" na tela de login),
+`--enable-insecure-login` e a `ServiceAccount` do próprio pod ligada a
+`cluster-admin` via `ClusterRoleBinding` — sem nenhuma credencial
+apresentada, o backend usa a identidade da própria ServiceAccount, que já
+tem acesso total. Confirmado com uma chamada de API real, sem nenhum header:
+`GET /api/v1/namespace` retornou a lista completa de namespaces do spoke.
+
+Dois problemas reais foram pegos rodando de verdade, não hipotéticos: (1) o
+container entra em `panic` na inicialização
+(`secrets "kubernetes-dashboard-csrf" not found`) porque a imagem espera três
+Secrets (`kubernetes-dashboard-certs`, `-csrf`, `-key-holder`) já existirem
+no seu namespace — ela escreve neles em runtime, não os cria do zero; (2) o
+flag `--namespace` do Dashboard tem default `kube-system`, então sem
+`--namespace={{ .Release.Namespace }}` explícito ele procura seus próprios
+Secrets no namespace errado mesmo estando corretamente implantado em
+`kubernetes-dashboard`.
+
 ## Diagrama de componentes
 
 ```mermaid
@@ -238,6 +269,7 @@ Filhas atuais, por `sync-wave` (menor primeiro):
 | `"2"` | `argocd-networking` | `gitops/argocd` (directory) | `argocd` |
 | `"2"` | `dataplanes` (ApplicationSet) | git generator `files` (`dataplanes/*.yaml`) sobre o repo `dataplanes` | `argocd` (wrapper); filhas variam — spoke ou hub |
 | `"2"` | `dataplane-addons` (ApplicationSet) | `matrix`: gerador `clusters` × git `directories` (`addons/*`) | direto no spoke (por addon) |
+| `"2"` | `dataplane-dashboard` (ApplicationSet) | gerador `clusters`, filtrado por `lab.example.org/name: spoke-03` | direto no `spoke-03` (só ele) |
 
 **Por que essa ordem:** Crossplane core precisa existir antes de qualquer
 `Provider`/`ProviderConfig`/`Composition` que o referencie (wave 0 → 1); o
