@@ -1,2 +1,0 @@
-function:
-  image: registry.registry.svc.cluster.local:5000/dataplane-function:v0.1.1

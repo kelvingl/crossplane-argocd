@@ -1,6 +1,0 @@
-apiVersion: v2
-name: dataplane-instance
-description: Renders one AdvancedDataPlane claim from a dataplanes-repo directory's values.yaml
-type: application
-version: 0.1.0
-appVersion: "0.1.0"
