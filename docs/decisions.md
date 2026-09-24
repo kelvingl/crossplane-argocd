@@ -841,6 +841,116 @@ confirmados existindo nos spokes corretos.
 
 ---
 
+### ADR-030: spokes deixam de ser clusters k3d reais; viram vclusters dentro do hub
+
+**Decisão**: `spoke-01`/`spoke-02` (e qualquer spoke futuro) deixam de ser
+clusters k3d separados numa rede Docker compartilhada com o hub, e passam a
+ser [vclusters](https://vcluster.com) (loft-sh) rodando como workload dentro
+do próprio hub — provisionados declarativamente por uma Composition
+Crossplane. O hub passa a ser o único cluster k3d real do lab.
+
+**Contexto**: pedido explícito do operador: "quero trocar os clusters
+'dataplanes' do k3d por vclusters, iniciados dentro do k3d principal", com a
+instrução adicional de que o mecanismo deveria ser "uma composition chamada
+XDataplane". Isso colidia com uma Composition já existente: `XDataPlane`/
+`DataPlane` era, desde a feature 001, a Composition *baseline* (cria
+Namespace+Deployment+Service **dentro** de um spoke já existente). Perguntado
+diretamente, o operador confirmou: remover a Composition baseline por
+completo e reaproveitar o nome `XDataPlane`/`DataPlane` para este conceito
+novo e diferente (o spoke **em si**). A constitution foi emendada para v1.2.0
+antes da implementação (Principle II + Technology Constraints), também
+mediante perguntas diretas ao operador sobre dois pontos em aberto: qual
+provider usar para criar o vcluster (`provider-helm`, recomendado e
+escolhido) e se isso merecia um Principle novo ou só expandir o texto
+existente (decidiu-se expandir, mesmo padrão da emenda v1.1.0).
+
+**O que a feature entrega** (`specs/003-vcluster-dataplanes/`):
+- `compositions/dataplane-cluster/` — a Composition `XDataPlane`/`DataPlane`
+  redefinida: Patch-and-Transform clássico, compõe um único
+  `helm.crossplane.io/v1beta1` `Release` (via `provider-helm`) instalando o
+  chart oficial do vcluster (`https://charts.loft.sh`, `vcluster:0.37.2`) no
+  hub, release/namespace = nome do claim.
+- `crossplane/providers/provider-helm.yaml` — novo provider
+  (`xpkg.crossplane.io/crossplane-contrib/provider-helm:v1.4.0`), com RBAC de
+  `provider-helm`.
+- `charts/dataplane-cluster/templates/dataplane-claim.yaml` — o chart wrapper
+  do `ApplicationSet` `dataplanes` (ADR-029) ganhou mais um template
+  sempre-renderizado: uma claim `DataPlane` nomeada a partir de `cluster:` —
+  um `dataplanes/<spoke>.yaml` com só esse campo já basta pra um spoke novo
+  nascer.
+- `scripts/16-register-argocd-clusters.sh` reescrito para ler o Secret que o
+  próprio vcluster gera em tempo de execução, em vez de um arquivo de
+  kubeconfig local derivado do k3d.
+- `scripts/02-create-clusters.sh`/`00-up.sh` só criam o `hub`;
+  `scripts/03-register-spokes.sh` foi removido (seu trabalho — gerar o
+  Secret de kubeconfig do spoke — agora é feito pelo próprio chart do
+  vcluster).
+
+**Erros reais pegos testando de ponta a ponta (não hipotéticos)**:
+
+1. **RBAC do `provider-helm`**: a primeira tentativa reaproveitou o mesmo
+   truque de label `rbac.crossplane.io/aggregate-to-crossplane: "true"` já
+   usado por `provider-kubernetes-secrets` neste repo — falhou na hora
+   (`Release` não conseguiu criar seu próprio namespace: "cannot create
+   resource namespaces ... at the cluster scope"). Investigando o cluster ao
+   vivo: essa label agrega no `ClusterRole` `crossplane`, que só está ligado
+   à ServiceAccount do *core* do Crossplane, não à de cada provider — cada
+   provider ganha seu próprio `ClusterRole` `crossplane:provider:<revisão>:system`
+   automático, escopado só às suas CRDs e um baseline fixo
+   (secrets/configmaps/events/leases), sem gancho para extensão. É bem
+   possível que `provider-kubernetes-secrets` nunca tenha feito nada de
+   verdade desde que foi criado. Corrigido seguindo o exemplo oficial do
+   próprio `provider-helm` para uso in-cluster:
+   `DeploymentRuntimeConfig` fixando o nome da ServiceAccount, mais um
+   `ClusterRoleBinding` direto para `cluster-admin` — permissão ampla
+   porque o conteúdo de um chart Helm é arbitrário, não dá pra restringir.
+2. **Endereço do servidor do vcluster**: a primeira tentativa usou o FQDN
+   completo (`https://<nome>.<namespace>.svc.cluster.local:443`) para
+   `exportKubeConfig.server`. Testado com um pod de debug montando o Secret
+   de kubeconfig gerado: a verificação TLS falhou —
+   `x509: certificate is valid for ... not <fqdn>`. O certificado do próprio
+   vcluster só cobre a forma curta `<nome>.<namespace>` como SAN. Corrigido
+   para a forma curta; TLS real passou a funcionar sem
+   `insecure-skip-tls-verify` nenhum.
+3. **Secret de kubeconfig**: melhor do que o esperado — o Secret
+   `vc-<nome>` que o vcluster gera em tempo de execução tem chaves já
+   separadas (`certificate-authority`, `client-certificate`, `client-key`,
+   além de `config` com o kubeconfig completo), então
+   `scripts/16-register-argocd-clusters.sh` não precisa mais fazer parsing
+   de YAML via `kubectl config view` como fazia para o kubeconfig derivado
+   do k3d.
+4. **Cache do ArgoCD, de novo**: depois de cada mudança de chart/Composition
+   relevante (a nova Composition, o template novo do wrapper chart, a
+   remoção de `spoke-03`), o mesmo padrão já documentado em ADR-021/023/029
+   se repetiu — Applications continuaram refletindo o estado antigo até
+   Redis + repo-server + applicationset-controller serem reiniciados.
+5. **Reconciliação "congelada" depois de trocar o `ProviderConfig`**: depois
+   de repontar `providerconfig-spoke-01`/`02` para os Secrets dos vclusters,
+   os `Object`s do `provider-kubernetes` continuaram reportando
+   `Ready: "True"` sem os recursos existirem de fato no vcluster novo — só
+   convergiram depois de reiniciar o pod do `provider-kubernetes`. O mesmo
+   valeu para uma `Application` do ArgoCD (`dataplane-spoke-01-hello`), que
+   só recriou o Deployment depois de um `argocd.argoproj.io/refresh=hard`
+   manual. Nenhum dos dois lado reagiu sozinho à troca de credencial do
+   `ProviderConfig`/Secret do Cluster.
+6. **Namespace de um spoke removido não é limpo pelo `Release`**: deletar a
+   claim `DataPlane` remove o `Release` e tudo que ele criou (confirmado:
+   Secret de kubeconfig, pods, etc.) — mas não o namespace em si (Helm nunca
+   apaga o namespace de um release no uninstall, mesmo quando ele foi criado
+   automaticamente). Vira mais um passo manual de limpeza, junto com o
+   `ProviderConfig` e o Secret de Cluster do ArgoCD.
+
+**Status**: Aceito, verificado de ponta a ponta nas três user stories:
+provisionamento de um spoke novo (`spoke-03`) só a partir de um arquivo Git;
+migração real de `spoke-01`/`spoke-02` (claims `AdvancedDataPlane` e o chart
+`hello` direto no spoke confirmados rodando dentro dos vclusters, depois dos
+clusters k3d reais terem sido deletados de verdade —
+`k3d cluster delete spoke-01 spoke-02` — sem regressão); remoção de
+`spoke-03` (vcluster, `ProviderConfig` e Secret de Cluster todos confirmados
+removidos, com o gap do namespace documentado acima).
+
+---
+
 ## Resumo de decisões superadas ou com incidente associado
 
 | ADR | O que mudou | Por quê |
@@ -855,3 +965,4 @@ confirmados existindo nos spokes corretos.
 | ADR-027 | Registro de clusters no ArgoCD: lista hardcoded → repo `dataplanes` (ADR-028) | Pedido explícito do operador |
 | ADR-028 | `ApplicationSet`+Helm `lookup` descartado → script clonando o repo | `helm template` do repo-server do ArgoCD não tem acesso ao cluster |
 | ADR-029 | Pasta-por-instância + `clusters/` → um arquivo `dataplanes/<spoke>.yaml` | Pedido explícito do operador (charts + compositions por cluster) |
+| ADR-030 | Spokes k3d reais → vclusters dentro do hub; `XDataPlane`/`DataPlane` da feature 001 removida e reaproveitada | Pedido explícito do operador; nome reaproveitado só depois de confirmar com ele |
