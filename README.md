@@ -31,6 +31,7 @@ Terminologia: **spoke = cluster = dataplane** = control plane; **control-plane =
 - **App of apps**: uma única `Application` raiz (`gitops/root/app-of-apps.yaml`) aponta para `gitops/apps/`, que contém uma `Application` filha por componente da plataforma (Gogs, Crossplane core, Providers, ProviderConfigs, Compositions). Cada filha tem uma `sync-wave` para ordenar a instalação.
 - **Ciclo de vida de um spoke**: criar/destruir um spoke é uma operação do Crossplane, não um comando de infraestrutura — um arquivo `dataplanes/<spoke>.yaml` no repositório Gogs `dataplanes` gera automaticamente uma claim `DataPlane` (XRD `XDataPlane`, `compositions/dataplane-cluster/`), que instala o chart oficial do vcluster no hub via `provider-helm`. O mesmo arquivo também registra o spoke no ArgoCD (`scripts/16-register-argocd-clusters.sh`) e lista o que roda nele. Veja [specs/003-vcluster-dataplanes/](specs/003-vcluster-dataplanes/) para o design completo.
 - **Addons em todo spoke (`dataplane-addons`)**: um segundo app-of-apps, `gitops/apps/dataplane-addons-appset.yaml`, instala cada chart em `addons/<nome>/` em **todo** spoke registrado no ArgoCD — via um `matrix` generator combinando o gerador `clusters` (filtrado por `lab.example.org/role: dataplane`, para não pegar o `in-cluster`/hub) com um gerador `git` `directories` sobre `addons/*`. Dois addons de exemplo hoje: `prometheus` (servidor + UI em `https://prometheus.<spoke>.127-0-0-1.nip.io`) e `external-dns` (observa `Ingress` no spoke, provider `inmemory`). Ambos só ficam alcançáveis de fora porque o chart do vcluster liga `sync.toHost.ingresses` — um `Ingress` criado dentro do spoke é espelhado para o hub, onde o Traefik/cert-manager reais o veem. Veja `addons/README.md`.
+- **Addon filtrado a um spoke só (`dataplane-dashboard`)**: um terceiro app-of-apps, `gitops/apps/dataplane-dashboard-appset.yaml`, com o mesmo gerador `clusters`, mas com `selector.matchLabels: lab.example.org/name: spoke-03` — instala o Kubernetes Dashboard (`kubernetes-dashboard/`, **sem autenticação**) só no `spoke-03`, não em todo spoke.
 - **Composition S3 (MiniStack)**: XRD `XS3Bucket` / claim `S3Bucket` que provisiona um bucket S3 real (via `provider-aws-s3`) dentro do **[MiniStack](https://ministack.org)** (`ministack/`), um emulador local de serviços AWS rodando no hub — sem tocar em AWS de verdade. A UI é o **[StackPort](https://stackport.cloud)** (`davireis/stackport`), um browser universal de recursos AWS que aponta pra qualquer endpoint compatível. `crossplane/config/providerconfig-ministack.yaml` aponta o `provider-aws-s3` para o endpoint interno do MiniStack com credenciais fake (`test`/`test`, padrão universal de emuladores desse tipo). Nome do bucket é opcional (`spec.parameters.bucketName`, default `s3-<nome-do-claim>`). Veja `compositions/s3-bucket/`.
 
 **Nota**: a Composition avançada em Go (`dataplane-advanced`/`AdvancedDataPlane`, XRD `XDataPlaneAdvanced`) descrita em [specs/002-golang-composition-pipeline/](specs/002-golang-composition-pipeline/) foi removida — não existe mais neste repositório. O registry OCI privado (`registry/`) que hospedava a imagem da sua Function não tem mais nenhum consumidor no momento.
@@ -151,6 +152,29 @@ Adicionar `addons/<nome-novo>/` (um chart Helm válido) faz com que ele apareça
 todo spoke, existente ou futuro, no próximo sync — sem editar o `ApplicationSet`.
 Veja `addons/README.md`.
 
+### App-of-apps filtrado a um spoke só (`dataplane-dashboard`)
+
+Nem todo app-of-apps precisa mirar **todo** spoke. `dataplane-dashboard`
+(`gitops/apps/dataplane-dashboard-appset.yaml`) usa o mesmo gerador `clusters`
+do `dataplane-addons`, mas com um `selector.matchLabels` fixo em
+`lab.example.org/name: spoke-03` — instala o Kubernetes Dashboard
+**só** no `spoke-03`, mesmo com `spoke-01`/`spoke-02` também registrados. O
+chart (`kubernetes-dashboard/`, fora de `addons/` de propósito, para não ser
+pego pelo gerador `addons/*` do outro `ApplicationSet`) roda **sem
+autenticação** (`--enable-skip-login` + `ServiceAccount` ligada a
+`cluster-admin`) — decisão explícita do operador para este lab:
+
+```bash
+kubectl --context k3d-hub -n argocd get application | grep dataplane-dashboard
+# só dataplane-dashboard-spoke-03 — nenhuma Application pro spoke-01/spoke-02
+
+curl -sk https://dashboard.spoke-03.127-0-0-1.nip.io/api/v1/namespace
+# lista os namespaces sem nenhum header de autenticação
+```
+
+Trocar de spoke = trocar o valor de `lab.example.org/name` no `selector` do
+`ApplicationSet`.
+
 ### Testar a composition S3 (MiniStack)
 
 Setup (uma vez): cria o secret de credenciais fake que o `ProviderConfig "ministack"`
@@ -186,6 +210,8 @@ Adicione ao seu `/etc/hosts` (ou `C:\Windows\System32\drivers\etc\hosts` no Wind
 127.0.0.1 stackport.127-0-0-1.nip.io
 127.0.0.1 prometheus.spoke-01.127-0-0-1.nip.io
 127.0.0.1 prometheus.spoke-02.127-0-0-1.nip.io
+127.0.0.1 prometheus.spoke-03.127-0-0-1.nip.io
+127.0.0.1 dashboard.spoke-03.127-0-0-1.nip.io
 ```
 
 Depois acesse direto (ignore avisos de certificado auto-assinado/não confiável):
@@ -196,9 +222,13 @@ Depois acesse direto (ignore avisos de certificado auto-assinado/não confiável
   de port-forward dedicado.
 - **Prometheus** (um por spoke, addon `dataplane-addons`):
   https://prometheus.spoke-01.127-0-0-1.nip.io,
-  https://prometheus.spoke-02.127-0-0-1.nip.io — o `Ingress` é criado dentro do
+  https://prometheus.spoke-02.127-0-0-1.nip.io,
+  https://prometheus.spoke-03.127-0-0-1.nip.io — o `Ingress` é criado dentro do
   vcluster e sincronizado para o hub (`sync.toHost.ingresses`), então cada spoke
   novo precisa da sua própria entrada aqui.
+- **Kubernetes Dashboard** (só no `spoke-03`, addon `dataplane-dashboard`):
+  https://dashboard.spoke-03.127-0-0-1.nip.io — **sem autenticação**, de
+  propósito (lab local).
 
 Credenciais:
 - ArgoCD: **sem login** — acesso anônimo habilitado com role `admin` (lab local, sem exposição externa; ver `scripts/06-install-argocd.sh`). Se preferir reativar o login, remova `users.anonymous.enabled` do `argocd-cm` e `policy.default` do `argocd-rbac-cm` — a senha inicial do admin continua disponível em `argocd-initial-admin-secret` (`kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d`).
@@ -242,7 +272,9 @@ Depois:
 bootstrap/gogs/          manifests do Gogs (aplicados uma vez fora do Argo; depois o Argo os "adota")
 gitops/root/              Application raiz (app of apps)
 gitops/apps/               Applications filhas + os ApplicationSets "dataplanes" (lê
-                             dataplanes/*.yaml) e "dataplane-addons" (cluster generator)
+                             dataplanes/*.yaml), "dataplane-addons" (cluster generator,
+                             todo spoke) e "dataplane-dashboard" (cluster generator,
+                             filtrado a UM spoke)
 charts/dataplane-cluster/  chart usado pelo ApplicationSet "dataplanes" (renderiza, para cada
                              dataplanes/<spoke>.yaml: 1 claim DataPlane + 1 Application por
                              entrada de chart/composition)
@@ -250,6 +282,8 @@ gitops/argocd/             Ingress/TLS do ArgoCD e Gogs, ClusterIssuers, config 
 addons/                    charts instalados em TODO spoke pelo ApplicationSet "dataplane-addons"
 ├── prometheus/               servidor Prometheus + UI (Ingress sincronizado do spoke pro hub)
 └── external-dns/             observa Ingress no spoke, provider inmemory (demonstra o padrão)
+kubernetes-dashboard/      chart do ApplicationSet "dataplane-dashboard" (fora de addons/ de
+                             propósito — só vai pro spoke filtrado, não pra todo spoke)
 registry/                 manifests do registry OCI privado (Deployment/Service/Ingress/Certificate) —
                             sem consumidor no momento (a composition que o usava foi removida)
 ministack/                manifests do MiniStack + StackPort UI (emulador local de AWS)
