@@ -1,0 +1,34 @@
+{{- if not .Values.spoke }}
+{{- fail "values.spoke é obrigatório (injetado pelo ApplicationSet dataplane-addons)" }}
+{{- end }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus
+---
+# Escopo padrão de RBAC para o Prometheus descobrir alvos via a service
+# discovery do Kubernetes (role: pod) — só o que a config em configmap.yaml
+# de fato usa.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: prometheus
+rules:
+  - apiGroups: [""]
+    resources: ["nodes", "services", "endpoints", "pods"]
+    verbs: ["get", "list", "watch"]
+  - nonResourceURLs: ["/metrics"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: prometheus
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: prometheus
+subjects:
+  - kind: ServiceAccount
+    name: prometheus
+    namespace: {{ .Release.Namespace }}

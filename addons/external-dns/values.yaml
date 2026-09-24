@@ -1,0 +1,6 @@
+# spoke: preenchido automaticamente pelo ApplicationSet "dataplane-addons"
+# (destination.name do Cluster do ArgoCD) — usado como domain-filter
+# (<spoke>.127-0-0-1.nip.io) e como txt-owner-id.
+spoke: ""
+
+image: registry.k8s.io/external-dns/external-dns:v0.23.0

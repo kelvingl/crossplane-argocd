@@ -1,0 +1,6 @@
+apiVersion: v2
+name: prometheus
+description: Example dataplane addon — Prometheus server with its web UI, deployed by the dataplane-addons ApplicationSet into every spoke
+type: application
+version: 0.1.0
+appVersion: "v2.55.1"

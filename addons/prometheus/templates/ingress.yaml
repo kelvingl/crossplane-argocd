@@ -1,0 +1,32 @@
+# Este Ingress é criado DENTRO do spoke (vcluster); só vira alcançável de
+# fora porque o chart do vcluster (compositions/dataplane-cluster) liga
+# sync.toHost.ingresses — o vcluster sincroniza o objeto para o hub, onde o
+# Traefik real e o cert-manager real (nenhum dos dois roda dentro de um
+# spoke) enxergam a cópia sincronizada e agem sobre ela. Confirmado
+# funcionando via teste manual antes deste chart existir: HTTP 200 e depois
+# HTTPS 200 (certificado emitido pela lab-ca-issuer) num Ingress de teste
+# sincronizado de spoke-01.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: prometheus
+  annotations:
+    cert-manager.io/cluster-issuer: "lab-ca-issuer"
+    traefik.ingress.kubernetes.io/router.tls: "true"
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - "prometheus.{{ .Values.spoke }}.127-0-0-1.nip.io"
+      secretName: prometheus-tls
+  rules:
+    - host: "prometheus.{{ .Values.spoke }}.127-0-0-1.nip.io"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: prometheus
+                port:
+                  number: 9090

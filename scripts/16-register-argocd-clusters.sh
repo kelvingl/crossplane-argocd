@@ -26,6 +26,12 @@
 # previsível: "https://<spoke>.<spoke>:443" (a forma curta "nome.namespace"
 # — o certificado do vcluster só cobre essa forma, não o FQDN completo
 # "...svc.cluster.local"; ver specs/003-vcluster-dataplanes/research.md #2).
+#
+# O label extra "lab.example.org/role=dataplane" (além do
+# "argocd.argoproj.io/secret-type=cluster" que o ArgoCD exige) é o que o
+# ApplicationSet "dataplane-addons" (gerador `clusters`) usa para selecionar
+# só os spokes — sem ele, o gerador `clusters` também incluiria o
+# `in-cluster` implícito (o próprio hub).
 set -euo pipefail
 
 GOGS_ADMIN_USER="gitadmin"
@@ -84,7 +90,9 @@ register_cluster() {
     --from-literal=config="${config_json}" \
     --dry-run=client -o yaml \
   | kubectl --context k3d-hub label --local -f - \
-      argocd.argoproj.io/secret-type=cluster -o yaml \
+      argocd.argoproj.io/secret-type=cluster \
+      lab.example.org/role=dataplane \
+      -o yaml \
   | kubectl --context k3d-hub apply -f -
 }
 

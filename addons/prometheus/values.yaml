@@ -1,0 +1,6 @@
+# spoke: preenchido automaticamente pelo ApplicationSet "dataplane-addons"
+# (destination.name do Cluster do ArgoCD) — usado para montar o hostname
+# prometheus.<spoke>.127-0-0-1.nip.io.
+spoke: ""
+
+image: prom/prometheus:v2.55.1

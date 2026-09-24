@@ -1,0 +1,6 @@
+apiVersion: v2
+name: external-dns
+description: Example dataplane addon — external-dns watching Ingress in one spoke, deployed by the dataplane-addons ApplicationSet into every spoke
+type: application
+version: 0.1.0
+appVersion: "v0.23.0"

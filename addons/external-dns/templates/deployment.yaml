@@ -1,0 +1,32 @@
+# provider "inmemory": nip.io já resolve qualquer subdomínio para
+# 127.0.0.1 sozinho (sem precisar de nenhum registro real) — não existe um
+# provedor de DNS de verdade para este addon gerenciar. "inmemory" é o
+# provedor oficial do próprio external-dns para testes/demos: mantém os
+# registros em memória e loga cada reconciliação, provando o padrão
+# (observar Ingress, calcular o registro desejado, "publicá-lo") sem
+# depender de um backend de DNS real. Ver os logs do pod para ver o
+# hostname do Ingress do addon "prometheus" sendo descoberto.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: external-dns
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: external-dns
+  template:
+    metadata:
+      labels:
+        app: external-dns
+    spec:
+      serviceAccountName: external-dns
+      containers:
+        - name: external-dns
+          image: {{ .Values.image }}
+          args:
+            - --source=ingress
+            - --provider=inmemory
+            - --registry=noop
+            - --domain-filter={{ .Values.spoke }}.127-0-0-1.nip.io
+            - --log-level=info
