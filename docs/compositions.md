@@ -6,40 +6,51 @@ mesmo conjunto de alvos (`dev`, `build`, `push`, `test`, `clean`) e um Helm
 chart em `chart/` — nenhuma Composition é instalada por diretório solto
 (Constitution Technology Constraints: "Any Composition... MUST be packaged and
 released as a Helm chart"). O `Makefile` na raiz do repo apenas itera sobre
-`COMPOSITIONS := dataplane-baseline dataplane-advanced s3-bucket`, delegando
+`COMPOSITIONS := dataplane-cluster dataplane-advanced s3-bucket`, delegando
 para o Makefile de cada uma (`make build-all`, `make test-<nome>`,
 `make release-<nome>`, etc.).
 
-## 1. `dataplane-baseline` — Patch-and-Transform clássico
+## 1. `dataplane-cluster` — cria o spoke em si (vcluster)
 
 **XRD**: `xdataplanes.lab.example.org` / claim `DataPlane`
-(`compositions/dataplane-baseline/chart/templates/xrd-dataplane.yaml`).
+(`compositions/dataplane-cluster/chart/templates/xrd-dataplane.yaml`).
 
-**Parâmetros** (`spec.parameters`): `spoke` (string, obrigatório — deve bater
-com o nome de um `ProviderConfig` do provider-kubernetes), `image` (default
-`nginxdemos/hello`), `replicas` (default `1`).
+**Reaproveita o nome de uma Composition retirada (feature 001)**: até a
+feature 003 (vcluster-dataplanes), `XDataPlane`/`DataPlane` era a Composition
+*baseline* — Patch-and-Transform clássico, criava `Namespace + Deployment +
+Service` **dentro** de um spoke já existente (`spec.parameters.spoke`,
+`image`, `replicas`). Essa Composition e seus exemplos (`demo-01`/`demo-02`)
+foram removidos por completo, e o mesmo nome de XRD/claim foi reaproveitado
+para um conceito diferente: o spoke **em si**, não um workload dentro dele.
+Ver ADR correspondente em `docs/decisions.md`.
 
-**O que é composto**: três `kubernetes.crossplane.io/v1alpha2` `Object`s —
-`Namespace` (`dp-<claim-name>`), `Deployment` (`dataplane-<claim-name>`,
-imagem/replicas parametrizáveis) e `Service` (porta 80), todos escritos via
-patches `CombineFromComposite`/`FromCompositeFieldPath` clássicos do modelo
-`spec.resources` (Crossplane v1.x, sem function-pipeline). O nome de cada
-recurso é derivado do label estável `crossplane.io/claim-name` (não do nome
-gerado da XR — ver decisão correspondente em `docs/decisions.md`).
+**Parâmetros** (`spec.parameters`): nenhum obrigatório — só
+`kubernetesVersion` (opcional, repassado ao chart do vcluster se definido). O
+nome do spoke vem de `metadata.name` do claim, não de um parâmetro.
 
-**Como é empacotado**: `compositions/dataplane-baseline/chart/` — chart Helm
-mínimo, cujos templates são o XRD e a Composition originais movidos
-byte-a-byte (verificado via `helm template | diff` na migração — feature 002).
-Instalado pela Application `crossplane-compositions`
-(`gitops/apps/crossplane-compositions.yaml`, sync-wave `"1"`, releaseName
-`dataplane-baseline`).
+**O que é composto**: um único recurso `helm.crossplane.io/v1beta1` `Release`
+(provider `provider-helm`), instalando o chart oficial do vcluster
+(`https://charts.loft.sh`, chart `vcluster`) — release name e namespace
+ambos = nome do claim. `spec.forProvider.values.exportKubeConfig.server` é
+sobrescrito para a forma curta `https://<nome>.<nome>:443` (o certificado do
+próprio vcluster só cobre essa forma como SAN, não o FQDN completo
+`...svc.cluster.local` — confirmado testando, não suposto).
 
-**Makefile** (`compositions/dataplane-baseline/Makefile`): `dev`/`build` fazem
+**Como é empacotado**: `compositions/dataplane-cluster/chart/`, releaseName
+`dataplane-cluster`. Instalado pela Application `crossplane-compositions`
+(`gitops/apps/crossplane-compositions.yaml`, sync-wave `"1"`).
+
+**Makefile** (`compositions/dataplane-cluster/Makefile`): `dev`/`build` fazem
 `helm lint`/`helm template`; `push` é um no-op (não há imagem — é YAML puro);
-`test` aplica um claim de exemplo, espera `Ready`, confirma e remove.
+`test` aplica um claim de exemplo, espera `Ready` (o vcluster de fato subir
+pode levar ~1min), remove.
 
-**Exemplos**: `crossplane/examples/claim-dataplane-spoke-01.yaml` e
-`claim-dataplane-spoke-02.yaml`.
+**Exemplo**: `compositions/dataplane-cluster/examples/claim-dataplane.yaml`.
+
+Normalmente uma claim `DataPlane` não é aplicada à mão: o `ApplicationSet`
+`dataplanes` gera uma automaticamente para cada `dataplanes/<spoke>.yaml` no
+repositório `dataplanes` (mesmo arquivo que lista o que roda naquele spoke —
+ver `docs/gitops-workflow.md`).
 
 ## 2. `dataplane-advanced` — Composition Function em Go
 
@@ -131,8 +142,11 @@ imagem para publicar (`push` é no-op). `test` aplica
 ## Padrão comum entre as três
 
 Todas as Compositions:
-- selecionam o alvo (spoke ou MiniStack) só por `providerConfigRef.name`, nunca por
-  endpoint/credencial embutido (Constitution Principle II);
+- selecionam o alvo só por `providerConfigRef.name`, nunca por
+  endpoint/credencial embutido (Constitution Principle II) — `dataplane-advanced`
+  e `s3-bucket` endereçam um spoke/o MiniStack já existente por esse nome;
+  `dataplane-cluster` é a exceção estrutural: ele *cria* o alvo, então seu
+  `providerConfigRef` (`provider-helm`) é sempre o mesmo (`hub`), fixo;
 - têm pelo menos um exemplo aplicado e verificado de ponta a ponta antes de
   serem consideradas prontas (Constitution Principle IV);
 - são entregues via Helm chart e instaladas por uma `Application` ArgoCD

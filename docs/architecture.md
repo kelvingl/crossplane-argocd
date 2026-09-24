@@ -1,51 +1,104 @@
 # Arquitetura
 
-Este documento descreve a topologia atual do lab: os três clusters k3d, a árvore
-app-of-apps do ArgoCD, o papel do Crossplane no modelo hub-and-spoke, o Gogs como
-única fonte GitOps, o registry OCI privado e o emulador de AWS (MiniStack). Tudo aqui
-reflete o estado real dos manifests em `gitops/`, `crossplane/`, `compositions/`,
-`charts/`, `registry/` e `ministack/` — não um design aspiracional.
+Este documento descreve a topologia atual do lab: o cluster hub e os spokes
+vcluster, a árvore app-of-apps do ArgoCD, o papel do Crossplane no modelo
+hub-and-spoke, o Gogs como única fonte GitOps, o registry OCI privado e o
+emulador de AWS (MiniStack). Tudo aqui reflete o estado real dos manifests em
+`gitops/`, `crossplane/`, `compositions/`, `charts/`, `registry/` e `ministack/`
+— não um design aspiracional.
 
-## Visão geral: 3 clusters, 1 rede Docker
+## Visão geral: 1 cluster k3d real, spokes como vclusters dentro dele
 
 ```
-hub, spoke-01, spoke-02 — três clusters k3d na mesma rede Docker "hublab"
+hub — único cluster k3d real do lab
+spoke-01, spoke-02, ... — vclusters (loft-sh/vcluster) rodando DENTRO do hub
 ```
 
-- **`hub`**: o único cluster que roda ArgoCD, Gogs e o control plane do Crossplane
-  (core + providers). É o único ponto de controle da plataforma (Constitution
-  Principle II — Hub-and-Spoke Isolation).
-- **`spoke-01` / `spoke-02`**: não rodam nenhuma ferramenta de plataforma. Recebem
+Terminologia: **spoke = cluster = dataplane** (o mesmo dataplane, três nomes
+pelo mesmo motivo em contextos diferentes); **control-plane = hub**.
+
+- **`hub`**: o único cluster k3d real. Roda ArgoCD, Gogs, o control plane do
+  Crossplane (core + providers) — e, desde a feature 003
+  (vcluster-dataplanes), também os vclusters que são os spokes. É o único
+  ponto de controle da plataforma (Constitution Principle II —
+  Hub-and-Spoke Isolation).
+- **`spoke-01` / `spoke-02` / ...**: cada um é um vcluster rodando como
+  workload (um `StatefulSet` de um pod) dentro do hub — não mais um cluster
+  k3d separado (essa mudança é o que a feature 003 entrega; até ela,
+  spoke-01/spoke-02 eram clusters k3d reais numa rede Docker compartilhada
+  com o hub). Não rodam nenhuma ferramenta de plataforma própria. Recebem
   recursos de duas formas: (a) provisionados a partir do hub via
   `provider-kubernetes` (`kubernetes.crossplane.io/v1alpha2` `Object`), como
   efeito colateral de uma claim de Composition; ou (b) charts Helm aplicados
-  **diretamente** pelo ArgoCD, agora que cada spoke é um Cluster registrado no
+  **diretamente** pelo ArgoCD, já que cada spoke é um Cluster registrado no
   ArgoCD — sem Crossplane no meio. Ver "`dataplanes/<spoke>.yaml`" abaixo.
 
-Cada spoke é registrado no hub como um `ProviderConfig` (`crossplane/config/`)
-apontando para um `Secret` com o kubeconfig do spoke, criado fora do Git
-(Constitution Principle V — Secrets Never Committed). Compositions selecionam o
-spoke alvo exclusivamente por `spec.parameters.spoke` → `providerConfigRef.name`,
-nunca por endpoint/credencial embutidos.
+## Ciclo de vida de um spoke: a Composition `XDataPlane`
+
+Criar ou destruir um spoke é uma operação do Crossplane, não um comando de
+infraestrutura. A Composition `XDataPlane` (claim `DataPlane`,
+`compositions/dataplane-cluster/`) compõe um único recurso: um
+`helm.crossplane.io/v1beta1` `Release` (via o provider `provider-helm`) que
+instala o chart oficial do vcluster (`https://charts.loft.sh`, chart
+`vcluster`) dentro do hub, num namespace com o mesmo nome do claim.
+`provider-helm` usa credenciais `InjectedIdentity` (sua própria identidade
+dentro do cluster) e precisa de permissões equivalentes a `cluster-admin`
+(`crossplane/providers/provider-helm.yaml`) — o conteúdo de um chart Helm é
+arbitrário, então não dá pra restringir a um conjunto fixo de recursos como
+se faz para `provider-kubernetes`.
+
+O vcluster resultante gera, em tempo de execução, seu próprio Secret de
+kubeconfig (`vc-<nome-do-spoke>`, no namespace do spoke) — com chaves já
+separadas (`certificate-authority`, `client-certificate`, `client-key`,
+`config`), sem precisar de nenhum parsing. O `server` exportado é sobrescrito
+pela Composition para a forma curta `https://<nome>.<nome>:443` (não o FQDN
+completo `...svc.cluster.local` — o certificado do próprio vcluster só cobre
+a forma curta como SAN; usar o FQDN completo falha a verificação TLS,
+confirmado testando). TLS real funciona (`certificate-authority` do próprio
+Secret), sem precisar de `insecure-skip-tls-verify`.
+
+**IMPORTANTE — este XRD/claim reaproveita o nome da feature 001**: até a
+feature 003, `XDataPlane`/`DataPlane` era a Composition *baseline* (P&T
+clássico), que criava `Namespace + Deployment + Service` **dentro** de um
+spoke já existente. A feature 003 aposentou esse significado inteiramente
+(incluindo os exemplos `demo-01`/`demo-02` que ela produzia) e reaproveitou o
+mesmo nome de XRD/claim para um conceito bem diferente: o spoke **em si**.
+Ver ADR correspondente em `decisions.md`.
+
+## Registro de um spoke: `ProviderConfig` + Cluster do ArgoCD
+
+Cada spoke é registrado no hub como um `ProviderConfig`
+(`crossplane/config/providerconfig-spoke-*.yaml`) apontando para o Secret
+`vc-<spoke>` (namespace `<spoke>`, chave `config`) que o próprio vcluster já
+gerou — nenhuma credencial é gerada ou copiada à mão. Compositions selecionam
+o spoke alvo exclusivamente por `spec.parameters.spoke` →
+`providerConfigRef.name`, nunca por endpoint/credencial embutidos.
 
 Cada spoke também é registrado **no ArgoCD** como um Cluster (Secret com label
 `argocd.argoproj.io/secret-type: cluster` no namespace `argocd`). A *lista* de
 quais spokes registrar vem do Git — o campo `cluster:` de cada
-`dataplanes/<spoke>.yaml` no repositório `dataplanes` (mesmo arquivo que lista
-o que roda naquele cluster, ver seção seguinte) — mas a criação do Secret com
-as credenciais em si é imperativa, `scripts/16-register-argocd-clusters.sh`,
-que clona o repo `dataplanes` e reaproveita o mesmo kubeconfig usado pelo
-`ProviderConfig`. Isso faz `spoke-01`/`spoke-02` aparecerem em Settings >
-Clusters na UI do ArgoCD, ao lado do `in-cluster` (o próprio hub) — e é o que
-torna possível endereçar uma `Application` direto a um spoke
-(`destination.name: spoke-01`), usado pelas entradas `charts:` descritas
-abaixo.
+`dataplanes/<spoke>.yaml` no repositório `dataplanes` (mesmo arquivo que
+também dispara a criação do `DataPlane` claim e lista o que roda naquele
+cluster, ver seção seguinte) — mas a criação do Secret com as credenciais em
+si é imperativa, `scripts/16-register-argocd-clusters.sh`, que lê
+diretamente o Secret `vc-<spoke>` que o vcluster já gerou (nada de parsing de
+kubeconfig via `kubectl config view` como no modelo k3d antigo). Isso faz
+`spoke-01`/`spoke-02` aparecerem em Settings > Clusters na UI do ArgoCD, ao
+lado do `in-cluster` (o próprio hub) — e é o que torna possível endereçar uma
+`Application` direto a um spoke (`destination.name: spoke-01`), usado pelas
+entradas `charts:` descritas abaixo.
 
-Duas versões anteriores foram tentadas e descartadas antes desta: uma 100%
-declarativa via `ApplicationSet` + chart Helm com a função `lookup` (não
-funciona — o repo-server do ArgoCD roda `helm template` sem acesso ao
-cluster) e uma imperativa com lista de spokes hardcoded no script (perdeu a
-propriedade de "a lista vem do Git"). Ver ADR-027/028/029 em `decisions.md`.
+O registro do `ProviderConfig`/Cluster do ArgoCD continua um passo manual
+(script), mesmo com o spoke sendo criado via Crossplane — decisão deliberada
+para manter a Composition `XDataPlane` com uma única responsabilidade (criar
+o vcluster), sem expandir seu escopo além do que foi pedido.
+
+Duas versões anteriores da lógica de registro no ArgoCD foram tentadas e
+descartadas antes desta: uma 100% declarativa via `ApplicationSet` + chart
+Helm com a função `lookup` (não funciona — o repo-server do ArgoCD roda
+`helm template` sem acesso ao cluster) e uma imperativa com lista de spokes
+hardcoded no script (perdeu a propriedade de "a lista vem do Git"). Ver
+ADR-027/028/029 em `decisions.md`.
 
 ## `dataplanes/<spoke>.yaml`: o que roda em cada cluster
 
@@ -84,13 +137,20 @@ errado do gerador `files` para o nome do arquivo).
 
 ```mermaid
 flowchart TB
-    subgraph hub["cluster hub"]
+    subgraph hub["cluster hub (único cluster k3d real)"]
         direction TB
         Gogs["Gogs\n(git server)"]
         ArgoCD["ArgoCD\n(app-of-apps)"]
-        CP["Crossplane core\n+ provider-kubernetes\n+ provider-aws-s3"]
+        CP["Crossplane core\n+ provider-kubernetes\n+ provider-helm\n+ provider-aws-s3"]
         Registry["Registry OCI privado\n(registry:2)"]
         MiniStack["MiniStack\n(emulador AWS local)"]
+
+        subgraph spoke01["spoke-01 (vcluster)"]
+            NS1["dp-adv-01/\nDeployment+Service+ConfigMap"]
+        end
+        subgraph spoke02["spoke-02 (vcluster)"]
+            NS2["dp-adv-03/\nDeployment+Service+ConfigMap"]
+        end
 
         ArgoCD -->|reconcilia a partir de| Gogs
         ArgoCD -->|instala/atualiza| CP
@@ -98,18 +158,12 @@ flowchart TB
         ArgoCD -->|instala| MiniStack
         CP -->|pull da imagem da Function| Registry
         CP -->|provider-aws-s3 → Bucket| MiniStack
+        CP -->|provider-helm → Release| spoke01
+        CP -->|provider-helm → Release| spoke02
+        CP -->|provider-kubernetes\nProviderConfig spoke-01| NS1
+        CP -->|provider-kubernetes\nProviderConfig spoke-02| NS2
+        ArgoCD -->|destination.name: spoke-01\n(chart direto)| spoke01
     end
-
-    subgraph spoke01["cluster spoke-01"]
-        NS1["Namespace/Deployment/Service\n(dataplane baseline e/ou avançado)"]
-    end
-
-    subgraph spoke02["cluster spoke-02"]
-        NS2["Namespace/Deployment/Service\n(dataplane baseline e/ou avançado)"]
-    end
-
-    CP -->|provider-kubernetes\nProviderConfig spoke-01| NS1
-    CP -->|provider-kubernetes\nProviderConfig spoke-02| NS2
 
     Origin[("GitHub origin\n(backup/colaboração humana)")]
     DevLocal["Checkout local do operador"]
@@ -143,7 +197,7 @@ Filhas atuais, por `sync-wave` (menor primeiro):
 | `"0"` | `registry` | `registry/` (directory) | `registry` |
 | `"0"` | `ministack` | `ministack/` (directory) | `ministack` |
 | `"1"` | `crossplane-providers` | `crossplane/providers` (directory) | `crossplane-system` |
-| `"1"` | `crossplane-compositions` | `compositions/dataplane-baseline/chart` (helm) | `crossplane-system` |
+| `"1"` | `crossplane-compositions` | `compositions/dataplane-cluster/chart` (helm) | `crossplane-system` |
 | `"1"` | `crossplane-compositions-advanced` | `compositions/dataplane-advanced/chart` (helm) | `crossplane-system` |
 | `"1"` | `crossplane-compositions-s3` | `compositions/s3-bucket/chart` (helm) | `crossplane-system` |
 | `"2"` | `crossplane-config` | `crossplane/config` (directory) | `crossplane-system` |
@@ -166,22 +220,23 @@ intervenção manual.
 
 ## Papel do Crossplane (hub-and-spoke)
 
-O Crossplane roda **somente no hub**. Ele expõe XRDs/Compositions que, quando
-reivindicadas via `claim`, produzem recursos `kubernetes.crossplane.io/v1alpha2`
-`Object` — manifests brutos aplicados em um spoke via `provider-kubernetes`,
-usando o `ProviderConfig` cujo nome bate com `spec.parameters.spoke`. O
-Crossplane nunca fala diretamente com a API do spoke fora desse provider; ele
-também não instala nada no spoke além dos recursos que a Composition descreve
-(Namespace/ConfigMap/Deployment/Service, ou um Bucket via `provider-aws-s3`
-contra o MiniStack).
+O Crossplane roda **somente no hub**. Suas Compositions produzem dois tipos de
+efeito: (a) via `provider-kubernetes`, recursos `kubernetes.crossplane.io/v1alpha2`
+`Object` aplicados **dentro** de um spoke já existente, usando o `ProviderConfig`
+cujo nome bate com `spec.parameters.spoke`; (b) via `provider-helm`, um
+`Release` que instala um chart **no próprio hub** — hoje só usado por
+`dataplane-cluster` para trazer o spoke em si à existência. O Crossplane nunca
+fala diretamente com a API de um spoke fora do `provider-kubernetes`.
 
 Três Compositions existem hoje (ver `docs/compositions.md` para detalhes de cada
 uma):
-1. `dataplane-baseline` — Patch-and-Transform clássico, produz recursos em um spoke.
+1. `dataplane-cluster` — Patch-and-Transform clássico, cria o próprio spoke
+   (um vcluster, via `provider-helm`) — não produz recursos *dentro* de um
+   spoke, produz o spoke.
 2. `dataplane-advanced` — Composition Function em Go (`spec.mode: Pipeline`),
-   produz um conjunto mais rico de recursos em um spoke.
+   produz um conjunto mais rico de recursos **dentro** de um spoke.
 3. `s3-bucket` — Patch-and-Transform, provisiona um Bucket `provider-aws-s3` no
-   MiniStack (não em um spoke k3d — é o único caso onde o alvo não é um dos clusters
+   MiniStack (não num spoke — é o único caso onde o alvo não é um cluster
    spoke, e sim o emulador AWS rodando no hub).
 
 ## Gogs como única fonte GitOps
