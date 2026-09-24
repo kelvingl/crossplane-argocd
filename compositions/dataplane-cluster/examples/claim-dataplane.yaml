@@ -1,0 +1,4 @@
+apiVersion: lab.example.org/v1alpha1
+kind: DataPlane
+metadata:
+  name: dataplane-cluster-test

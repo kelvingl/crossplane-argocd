@@ -1,0 +1,48 @@
+# Classic Patch-and-Transform Composition: from a DataPlane claim, installs
+# one vcluster (loft-sh/vcluster Helm chart) inside the hub via provider-helm,
+# in a namespace named after the claim. No procedural logic needed — a
+# function-pipeline Composition Function would be overkill for "render one
+# Helm Release", unlike dataplane-advanced (feature 002).
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xdataplanes.lab.example.org
+  labels:
+    lab.example.org/provider: helm
+spec:
+  compositeTypeRef:
+    apiVersion: lab.example.org/v1alpha1
+    kind: XDataPlane
+  resources:
+    - name: vcluster-release
+      base:
+        apiVersion: helm.crossplane.io/v1beta1
+        kind: Release
+        spec:
+          forProvider:
+            chart:
+              repository: {{ .Values.vcluster.chartRepository | quote }}
+              name: {{ .Values.vcluster.chartName | quote }}
+              version: {{ .Values.vcluster.chartVersion | quote }}
+            namespace: placeholder
+            values:
+              exportKubeConfig:
+                insecure: false
+          providerConfigRef:
+            name: hub
+      patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: metadata.labels[crossplane.io/claim-name]
+          toFieldPath: metadata.name
+        - type: FromCompositeFieldPath
+          fromFieldPath: metadata.labels[crossplane.io/claim-name]
+          toFieldPath: spec.forProvider.namespace
+        - type: CombineFromComposite
+          combine:
+            variables:
+              - fromFieldPath: metadata.labels[crossplane.io/claim-name]
+              - fromFieldPath: metadata.labels[crossplane.io/claim-name]
+            strategy: string
+            string:
+              fmt: "https://%s.%s.svc.cluster.local:443"
+          toFieldPath: spec.forProvider.values.exportKubeConfig.server

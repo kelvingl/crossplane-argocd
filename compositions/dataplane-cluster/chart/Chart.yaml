@@ -1,0 +1,6 @@
+apiVersion: v2
+name: dataplane-cluster
+description: XDataPlane Composition (redefined, feature 003) — provisions a dataplane/spoke cluster itself as a vcluster inside the hub, via provider-helm
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

@@ -1,0 +1,5 @@
+# default vcluster chart coordinates — see specs/003-vcluster-dataplanes/research.md #1
+vcluster:
+  chartRepository: https://charts.loft.sh
+  chartName: vcluster
+  chartVersion: 0.37.2

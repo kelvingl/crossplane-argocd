@@ -1,0 +1,39 @@
+# XDataPlane / DataPlane — redefined by feature 003-vcluster-dataplanes.
+# Previously (feature 001): a workload inside an already-existing spoke.
+# Now: the dataplane/spoke *cluster itself*, provisioned as a vcluster
+# inside the hub. Same XRD/claim names, deliberately reused — see
+# docs/decisions.md and the constitution's v1.2.0 amendment.
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xdataplanes.lab.example.org
+spec:
+  group: lab.example.org
+  names:
+    kind: XDataPlane
+    plural: xdataplanes
+  claimNames:
+    kind: DataPlane
+    plural: dataplanes
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                parameters:
+                  type: object
+                  properties:
+                    kubernetesVersion:
+                      type: string
+                      description: >-
+                        Optional — passed through to the vcluster chart's
+                        controlPlane.distro Kubernetes version if set;
+                        otherwise the chart's own default is used.
+                  default: {}
+              default: {}
