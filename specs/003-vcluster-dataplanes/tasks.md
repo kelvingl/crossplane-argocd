@@ -79,12 +79,12 @@ running k3d/Docker — a `Ready` `DataPlane` claim, a running vcluster in the hu
 Cluster for `spoke-03`.
 
 - [x] T018 [US1] Write `charts/dataplane-cluster/templates/dataplane-claim.yaml` in the platform repo: always renders exactly one `DataPlane` claim named `{{ .Values.cluster }}`, regardless of whether `charts:`/`compositions:` are empty (data-model.md, research.md #7) — rendered directly by the wrapper chart itself, **not** routed through `_helpers.tpl`'s composition-name→chart-path map used by `compositions:` entries, since the cluster claim isn't one more workload composition, it's the spoke itself
-- [ ] T019 [US1] Commit and push the platform repo change from T018; force-refresh `root-app-of-apps`/the `dataplanes` `ApplicationSet` if ArgoCD's layered caches don't pick it up within a few minutes (known issue, see quickstart.md Troubleshooting)
-- [ ] T020 [US1] In the local `dataplanes` working copy, add `dataplanes/spoke-03.yaml` with `cluster: spoke-03`, `charts: []`, `compositions: []`; commit and push to the `gogs` remote
-- [ ] T021 [US1] Verify `dataplane-spoke-03` wrapper `Application` and its child `Application` for the `DataPlane` claim are `Synced`/`Healthy`; verify `kubectl --context k3d-hub get dataplane spoke-03` reaches `Ready` within 5 minutes (SC-001)
-- [ ] T022 [US1] Verify the vcluster's pods are running in the hub (`kubectl --context k3d-hub -n spoke-03 get pods`) and its kubeconfig Secret exists (`kubectl --context k3d-hub -n spoke-03 get secrets`)
-- [ ] T023 [US1] Write `crossplane/config/providerconfig-spoke-03.yaml` (same shape as `providerconfig-spoke-01.yaml`, `secretRef` pointing at `spoke-03`'s vcluster-generated Secret per research.md #4); commit, push, sync `crossplane-config`
-- [ ] T024 [US1] Update `scripts/16-register-argocd-clusters.sh` to read each spoke's vcluster-generated kubeconfig Secret directly (namespace = spoke name) instead of a `.secrets/<spoke>.kubeconfig` local file (research.md #4); run it and confirm `spoke-03` appears via `GET /api/v1/clusters` on the ArgoCD API (SC-001)
+- [x] T019 [US1] Commit and push the platform repo change from T018; force-refresh `root-app-of-apps`/the `dataplanes` `ApplicationSet` if ArgoCD's layered caches don't pick it up within a few minutes (known issue, see quickstart.md Troubleshooting)
+- [x] T020 [US1] In the local `dataplanes` working copy, add `dataplanes/spoke-03.yaml` with `cluster: spoke-03`, `charts: []`, `compositions: []`; commit and push to the `gogs` remote
+- [x] T021 [US1] Verify `dataplane-spoke-03` wrapper `Application` and its child `Application` for the `DataPlane` claim are `Synced`/`Healthy`; verify `kubectl --context k3d-hub get dataplane spoke-03` reaches `Ready` within 5 minutes (SC-001)
+- [x] T022 [US1] Verify the vcluster's pods are running in the hub (`kubectl --context k3d-hub -n spoke-03 get pods`) and its kubeconfig Secret exists (`kubectl --context k3d-hub -n spoke-03 get secrets`)
+- [x] T023 [US1] Write `crossplane/config/providerconfig-spoke-03.yaml` (same shape as `providerconfig-spoke-01.yaml`, `secretRef` pointing at `spoke-03`'s vcluster-generated Secret per research.md #4); commit, push, sync `crossplane-config`
+- [x] T024 [US1] Update `scripts/16-register-argocd-clusters.sh` to read each spoke's vcluster-generated kubeconfig Secret directly (namespace = spoke name) instead of a `.secrets/<spoke>.kubeconfig` local file (research.md #4); run it and confirm `spoke-03` appears via `GET /api/v1/clusters` on the ArgoCD API (SC-001)
 
 **Checkpoint**: User Story 1 fully functional and independently verifiable — a brand-new dataplane cluster exists from one Git-committed file, zero k3d/Docker commands. `spoke-03` stays running for US3's teardown verification.
 
@@ -99,16 +99,16 @@ chart.
 **Independent Test**: After migration, `adv-01`'s claim and `dataplanes/spoke-01.yaml`'s `hello` chart entry are both still `Ready`/`Synced`+`Healthy`, with zero
 edits to either.
 
-- [ ] T025 [US2] Confirm `dataplane-spoke-01` and `dataplane-spoke-02` wrapper Applications (already existing from ADR-029) automatically pick up T018's new template and each produce a `Ready` `DataPlane` claim (`spoke-01`, `spoke-02`) with **no edit** to `dataplanes/spoke-01.yaml`/`dataplanes/spoke-02.yaml` (FR-005)
-- [ ] T026 [US2] Verify both vclusters come up in the hub (`kubectl --context k3d-hub -n spoke-01 get pods`, same for `spoke-02`) alongside the still-running real k3d `spoke-01`/`spoke-02` clusters (controlled cutover window)
-- [ ] T027 [US2] Update `crossplane/config/providerconfig-spoke-01.yaml` and `providerconfig-spoke-02.yaml`: `secretRef` now points at each spoke's vcluster-generated Secret (namespace = spoke name) instead of `crossplane-system/<spoke>-kubeconfig`; commit, push, sync `crossplane-config`
-- [ ] T028 [US2] Re-run the updated `scripts/16-register-argocd-clusters.sh` (T024); confirm the ArgoCD Cluster entries for `spoke-01`/`spoke-02` now report the vcluster's in-cluster Service address, not the old Docker container IP
-- [ ] T029 [US2] Verify `AdvancedDataPlane` claims `adv-01`/`adv-03` reconcile against the new vclusters with **no edit to either claim** — `selfHeal` recreates their composed resources inside the vcluster; confirm `Ready: "True"` and the resources exist (`kubectl --context k3d-hub -n spoke-01 exec ... -- kubectl get ns dp-adv-01 deploy,svc,cm`, per quickstart.md)
-- [ ] T030 [US2] Verify `dataplanes/spoke-01.yaml`'s `hello` chart entry's Application (`dataplane-spoke-01-hello`) stays `Synced`/`Healthy` against the vcluster, with **no edit** to `dataplanes/spoke-01.yaml` or `charts/hello/` (FR-005)
-- [ ] T031 [US2] Retire `scripts/03-register-spokes.sh` (delete the file; its job — generating a spoke kubeconfig Secret — is now done by the vcluster chart itself) and remove its call from `scripts/00-up.sh`
-- [ ] T032 [US2] Update `scripts/02-create-clusters.sh` to create only the `hub` k3d cluster — remove `spoke-01`/`spoke-02` creation, the shared-network wiring, and the `--tls-san` logic (Technology Constraints, v1.2.0)
-- [ ] T033 [US2] Decommission the old real k3d clusters: `k3d cluster delete spoke-01 spoke-02`; confirm `spoke-01`/`spoke-02` workloads are still healthy afterward (proves the vclusters, not the old k3d clusters, were actually serving them)
-- [ ] T034 [US2] Update `README.md`'s "Passo a passo" and "Estrutura" sections: remove `scripts/03-register-spokes.sh` from the setup sequence, note only `hub` is a real k3d cluster, spokes are vclusters created via `DataPlane` claims
+- [x] T025 [US2] Confirm `dataplane-spoke-01` and `dataplane-spoke-02` wrapper Applications (already existing from ADR-029) automatically pick up T018's new template and each produce a `Ready` `DataPlane` claim (`spoke-01`, `spoke-02`) with **no edit** to `dataplanes/spoke-01.yaml`/`dataplanes/spoke-02.yaml` (FR-005)
+- [x] T026 [US2] Verify both vclusters come up in the hub (`kubectl --context k3d-hub -n spoke-01 get pods`, same for `spoke-02`) alongside the still-running real k3d `spoke-01`/`spoke-02` clusters (controlled cutover window)
+- [x] T027 [US2] Update `crossplane/config/providerconfig-spoke-01.yaml` and `providerconfig-spoke-02.yaml`: `secretRef` now points at each spoke's vcluster-generated Secret (namespace = spoke name) instead of `crossplane-system/<spoke>-kubeconfig`; commit, push, sync `crossplane-config`
+- [x] T028 [US2] Re-run the updated `scripts/16-register-argocd-clusters.sh` (T024); confirm the ArgoCD Cluster entries for `spoke-01`/`spoke-02` now report the vcluster's in-cluster Service address, not the old Docker container IP
+- [x] T029 [US2] Verify `AdvancedDataPlane` claims `adv-01`/`adv-03` reconcile against the new vclusters with **no edit to either claim** — `selfHeal` recreates their composed resources inside the vcluster; confirm `Ready: "True"` and the resources exist (`kubectl --context k3d-hub -n spoke-01 exec ... -- kubectl get ns dp-adv-01 deploy,svc,cm`, per quickstart.md)
+- [x] T030 [US2] Verify `dataplanes/spoke-01.yaml`'s `hello` chart entry's Application (`dataplane-spoke-01-hello`) stays `Synced`/`Healthy` against the vcluster, with **no edit** to `dataplanes/spoke-01.yaml` or `charts/hello/` (FR-005)
+- [x] T031 [US2] Retire `scripts/03-register-spokes.sh` (delete the file; its job — generating a spoke kubeconfig Secret — is now done by the vcluster chart itself) and remove its call from `scripts/00-up.sh`
+- [x] T032 [US2] Update `scripts/02-create-clusters.sh` to create only the `hub` k3d cluster — remove `spoke-01`/`spoke-02` creation, the shared-network wiring, and the `--tls-san` logic (Technology Constraints, v1.2.0)
+- [x] T033 [US2] Decommission the old real k3d clusters: `k3d cluster delete spoke-01 spoke-02`; confirm `spoke-01`/`spoke-02` workloads are still healthy afterward (proves the vclusters, not the old k3d clusters, were actually serving them)
+- [x] T034 [US2] Update `README.md`'s "Passo a passo" and "Estrutura" sections: remove `scripts/03-register-spokes.sh` from the setup sequence, note only `hub` is a real k3d cluster, spokes are vclusters created via `DataPlane` claims
 
 **Checkpoint**: User Story 2 fully functional — `spoke-01`/`spoke-02` are vclusters, every pre-existing spoke-dependent resource still works, unmodified, and the old real k3d spoke clusters no longer exist.
 
@@ -121,10 +121,10 @@ edits to either.
 **Independent Test**: Delete `spoke-03`'s claim (created in US1) and confirm its
 vcluster and namespace are gone.
 
-- [ ] T035 [US3] Remove `dataplanes/spoke-03.yaml` from the `dataplanes` repo, commit and push; confirm the `dataplane-spoke-03` wrapper Application (and its `DataPlane`-claim child) is pruned by the `dataplanes` `ApplicationSet`
-- [ ] T036 [US3] Confirm the `spoke-03` claim's composed `Release` is deleted and the vcluster's namespace/pods/kubeconfig Secret are gone from the hub within 5 minutes (SC-003)
-- [ ] T037 [US3] Manually remove `spoke-03`'s now-stale `ProviderConfig` (`crossplane/config/providerconfig-spoke-03.yaml`, delete file + `kubectl delete`) and its ArgoCD Cluster Secret (`kubectl --context k3d-hub -n argocd delete secret cluster-spoke-03`) — confirmed as a manual step, not automated, per contracts/dataplane-claim.md
-- [ ] T038 [US3] Confirm zero orphaned resources remain for `spoke-03` anywhere in the hub (SC-003)
+- [x] T035 [US3] Remove `dataplanes/spoke-03.yaml` from the `dataplanes` repo, commit and push; confirm the `dataplane-spoke-03` wrapper Application (and its `DataPlane`-claim child) is pruned by the `dataplanes` `ApplicationSet`
+- [x] T036 [US3] Confirm the `spoke-03` claim's composed `Release` is deleted and the vcluster's namespace/pods/kubeconfig Secret are gone from the hub within 5 minutes (SC-003)
+- [x] T037 [US3] Manually remove `spoke-03`'s now-stale `ProviderConfig` (`crossplane/config/providerconfig-spoke-03.yaml`, delete file + `kubectl delete`) and its ArgoCD Cluster Secret (`kubectl --context k3d-hub -n argocd delete secret cluster-spoke-03`) — confirmed as a manual step, not automated, per contracts/dataplane-claim.md
+- [x] T038 [US3] Confirm zero orphaned resources remain for `spoke-03` anywhere in the hub (SC-003)
 
 **Checkpoint**: All three user stories independently verified. Feature functionally complete.
 

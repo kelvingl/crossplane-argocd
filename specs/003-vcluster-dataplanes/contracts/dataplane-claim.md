@@ -39,10 +39,14 @@ spec:
    the mechanism preventing the kind of naming collision documented in
    `docs/decisions.md` ADR-019.
 4. **Deleting the claim tears down the vcluster** (the `Release` is deleted, which
-   uninstalls the Helm release and removes its namespace's resources, including its
-   kubeconfig Secret). It does **not** automatically remove the spoke's
-   `ProviderConfig` or its ArgoCD Cluster Secret — those remain a manual step via the
-   existing registration scripts, matching today's behavior for any spoke removal.
+   uninstalls the Helm release, removing every resource it created — including the
+   kubeconfig Secret). Confirmed by testing one real gap: the **namespace itself**
+   is not removed by this (Helm/`provider-helm` create a release's namespace as a
+   side effect, never delete it on uninstall — this is standard Helm behavior, not a
+   bug in this feature) — deleting it is a manual step, done the same pass as the
+   two below. Also **not** automated: removing the spoke's `ProviderConfig` or its
+   ArgoCD Cluster Secret — all three remain manual cleanup, matching today's
+   behavior for any spoke removal (see research.md #8).
 
 ## What this claim does **not** do
 
