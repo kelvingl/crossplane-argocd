@@ -1,0 +1,9 @@
+{{- if not .Values.cluster }}
+{{- fail "values.cluster é obrigatório (ex.: spoke-01)" }}
+{{- end }}
+apiVersion: lab.example.org/v1alpha1
+kind: DataPlane
+metadata:
+  name: "{{ .Values.cluster }}"
+  namespace: default
+spec: {}

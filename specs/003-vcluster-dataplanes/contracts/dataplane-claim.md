@@ -26,9 +26,11 @@ spec:
 
 ## Guarantees
 
-1. **No parameters are required beyond the claim's name.** An empty
-   `spec: { parameters: {} }` (or an entirely absent `parameters` block) is valid
-   and results in a working vcluster using the chart's own defaults.
+1. **No parameters are required beyond the claim's name.** `spec: {}` (an empty but
+   present `spec`, with `parameters` entirely absent) is valid and results in a
+   working vcluster using the chart's own defaults — confirmed by testing: an
+   entirely absent `spec` is rejected (`spec: Required value`), but an empty one is
+   accepted.
 2. **Readiness**: the claim reports `status.conditions[type=Ready].status: "True"`
    once the composed `provider-helm` `Release` is itself ready — no additional
    manual step confirms a vcluster is usable.
