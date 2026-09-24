@@ -10,7 +10,7 @@ spec:
   source:
     repoURL: http://gogs.gogs.svc.cluster.local:3000/gitadmin/platform.git
     targetRevision: main
-    path: compositions/s3-bucket/chart
+    path: gitops/crossplane/compositions/s3-bucket/chart
     helm:
       releaseName: s3-bucket
   destination:

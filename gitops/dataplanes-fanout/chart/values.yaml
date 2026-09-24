@@ -1,0 +1,23 @@
+# Renderizado uma vez por spoke pelo ApplicationSet "dataplanes"
+# (gitops/apps/dataplanes-appset.yaml), a partir de um arquivo
+# dataplanes/<spoke>.yaml no repositório "dataplanes". Cada entrada de
+# "charts" e "compositions" vira uma Application filha própria — ver
+# templates/charts.yaml e templates/compositions.yaml.
+cluster: ""
+
+# charts: Helm charts aplicados diretamente no cluster do spoke (destination
+# = o Cluster do ArgoCD registrado por
+# bootstrap/scripts/16-register-argocd-clusters.sh).
+# - name:   identifica a Application filha (dataplane-<cluster>-<name>)
+#   chart:  caminho, no repo dataplanes, até o chart (ex.: charts/hello)
+#   values: values.yaml do chart, inline
+charts: []
+
+# compositions: claims de Composition do Crossplane para este spoke,
+# aplicadas no hub (o Crossplane só roda lá) — o parâmetro "spoke" é
+# injetado automaticamente a partir de "cluster" acima.
+# - name:        nome do claim/release (ex.: adv-01)
+#   composition: nome de uma Composition com instance-chart conhecido
+#                (ver templates/_helpers.tpl) — hoje só "dataplane-advanced"
+#   values:      values do instance-chart daquela Composition (sem "spoke")
+compositions: []

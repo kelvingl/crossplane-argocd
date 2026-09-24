@@ -1,0 +1,55 @@
+# Instala cada addon em gitops/addons/<nome>/chart/ (chart Helm) em TODOS os
+# spokes registrados no ArgoCD, via o gerador `clusters` combinado com um
+# gerador `git` directories sobre gitops/addons/*, num `matrix` — produz uma
+# Application por (spoke × addon). O seletor de label restringe o gerador
+# `clusters` aos spokes de verdade (lab.example.org/role=dataplane, aplicado
+# por bootstrap/scripts/16-register-argocd-clusters.sh); sem ele, o gerador
+# `clusters` também incluiria o `in-cluster` implícito (o próprio hub), onde
+# nenhum desses addons faz sentido.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: dataplane-addons
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  generators:
+    - matrix:
+        generators:
+          - clusters:
+              selector:
+                matchLabels:
+                  lab.example.org/role: dataplane
+          - git:
+              repoURL: http://gogs.gogs.svc.cluster.local:3000/gitadmin/platform.git
+              revision: main
+              directories:
+                - path: "gitops/addons/*"
+  template:
+    metadata:
+      name: "dataplane-addons-{{name}}-{{path.basename}}"
+      namespace: argocd
+      annotations:
+        argocd.argoproj.io/sync-wave: "2"
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io
+    spec:
+      project: default
+      source:
+        repoURL: http://gogs.gogs.svc.cluster.local:3000/gitadmin/platform.git
+        targetRevision: main
+        path: "{{path}}/chart"
+        helm:
+          releaseName: "{{path.basename}}"
+          valuesObject:
+            spoke: "{{name}}"
+      destination:
+        name: "{{name}}"
+        namespace: "{{path.basename}}"
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true

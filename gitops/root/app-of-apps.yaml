@@ -7,14 +7,21 @@ metadata:
     - resources-finalizer.argocd.argoproj.io
 spec:
   project: default
-  source:
-    repoURL: http://gogs.gogs.svc.cluster.local:3000/gitadmin/platform.git
-    targetRevision: main
-    path: gitops/apps
-    directory:
-      exclude: |
-        !*.yaml
-        !*.yml
+  sources:
+    - repoURL: http://gogs.gogs.svc.cluster.local:3000/gitadmin/platform.git
+      targetRevision: main
+      path: gitops/apps
+      directory:
+        exclude: |
+          !*.yaml
+          !*.yml
+    - repoURL: http://gogs.gogs.svc.cluster.local:3000/gitadmin/platform.git
+      targetRevision: main
+      path: gitops/appset
+      directory:
+        exclude: |
+          !*.yaml
+          !*.yml
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd

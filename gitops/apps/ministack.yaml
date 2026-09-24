@@ -10,7 +10,7 @@ spec:
   source:
     repoURL: http://gogs.gogs.svc.cluster.local:3000/gitadmin/platform.git
     targetRevision: main
-    path: ministack
+    path: gitops/ministack
   destination:
     server: https://kubernetes.default.svc
     namespace: ministack
