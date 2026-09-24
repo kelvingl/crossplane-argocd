@@ -1,13 +1,10 @@
 #!/usr/bin/env bash
-# Cria os 3 clusters k3d (hub, spoke-01, spoke-02) na mesma rede docker
-# "hublab". O k3d já inclui o nome do container do server (ex.
-# k3d-spoke-01-server-0) nos SANs do certificado por padrão, então nenhuma
-# flag extra de TLS é necessária aqui. Nesta rede docker (Rancher Desktop),
-# porém, a resolução de nome de container não funciona de dentro de outro
-# container (não é o DNS embutido clássico do Docker), então
-# scripts/03-register-spokes.sh usa o IP do container do spoke, não o nome,
-# e desativa a verificação de TLS no kubeconfig gerado para o
-# ProviderConfig (lab local — sem isso o hub não alcança o spoke).
+# Cria o cluster k3d "hub" — o único cluster k3d real deste lab desde a
+# feature 003 (vcluster-dataplanes). Dataplanes/spokes não são mais
+# clusters k3d separados: são vclusters provisionados dentro do próprio hub
+# via claims DataPlane (compositions/dataplane-cluster). A rede docker
+# "hublab" continua existindo só para o hub (mantida pelo nome por
+# compatibilidade com scripts antigos que possam referenciá-la).
 set -euo pipefail
 
 NETWORK="hublab"
@@ -26,8 +23,6 @@ create_cluster() {
 }
 
 create_cluster hub -p "80:80@loadbalancer" -p "443:443@loadbalancer"
-create_cluster spoke-01
-create_cluster spoke-02
 
 kubectl config use-context k3d-hub
 
