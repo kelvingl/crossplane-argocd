@@ -1,0 +1,10 @@
+# provider-helm manages Helm releases in the same cluster it runs in (the
+# hub) — InjectedIdentity means "use my own in-cluster ServiceAccount",
+# no kubeconfig Secret needed.
+apiVersion: helm.crossplane.io/v1beta1
+kind: ProviderConfig
+metadata:
+  name: hub
+spec:
+  credentials:
+    source: InjectedIdentity

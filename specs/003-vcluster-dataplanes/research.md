@@ -4,8 +4,13 @@
 
 **Decision**: `crossplane-contrib/provider-helm`'s `Release` resource, installing the
 official `loft-sh/vcluster` Helm chart from its public upstream chart repository
-(`https://charts.loft.sh`), one release per `DataPlane` claim, in a namespace named
-after the claim (e.g. release `spoke-01` in namespace `spoke-01`).
+(`https://charts.loft.sh`, chart `vcluster`, confirmed reachable and pinned to
+`0.37.2`, its current stable release), one release per `DataPlane` claim, in a
+namespace named after the claim (e.g. release `spoke-01` in namespace `spoke-01`).
+Provider package: `xpkg.crossplane.io/crossplane-contrib/provider-helm:v1.4.0` (the
+registry host `provider-helm`'s own official examples use, distinct from
+`xpkg.upbound.io` used by this repo's other providers — both are public OCI
+registries; followed the upstream-documented one rather than assuming parity).
 
 **Rationale**: This is the vcluster project's own documented, supported install
 method, and the operator explicitly chose `provider-helm` over reimplementing the
@@ -70,12 +75,20 @@ not a design fork.
 
 ## 4. Where does the vcluster's kubeconfig Secret actually land, and what shape is it?
 
-**Decision**: Read it directly from wherever the vcluster chart creates it (by
-convention, a Secret in the vcluster's own namespace, commonly named `vc-<release
-name>`), rather than copying it into a fixed `crossplane-system/<spoke>-kubeconfig`
-Secret the way `scripts/03-register-spokes.sh` used to create by hand. Both
+**Decision**: Read it directly from wherever the vcluster chart creates it — confirmed
+from the chart's own `values.yaml` (`exportKubeConfig.secret`, "If this is not
+defined, vCluster will create it with `vc-NAME`"): a Secret named `vc-<release
+name>` in the vcluster's own namespace (same namespace as the release, since
+`exportKubeConfig.secret.namespace` is left unset). The key inside that Secret is
+expected to be `config` (vcluster's documented convention) — not verified against
+the chart's static templates (it's written at runtime by the running vcluster
+control-plane process, not a Helm template), so this one specific detail is
+confirmed empirically during implementation, not just from the chart source.
+Either way, this is read directly rather than copied into a fixed
+`crossplane-system/<spoke>-kubeconfig` Secret the way
+`scripts/03-register-spokes.sh` used to create by hand — both
 `ProviderConfig.spec.credentials.secretRef` and the ArgoCD-registration script
-support referencing a Secret in any namespace by name — a copy step is unnecessary
+support referencing a Secret in any namespace by name, so a copy step is unnecessary
 complexity now that everything lives in one cluster.
 
 **Rationale**: Removing a manual copy step removes a class of drift (a stale copy
@@ -89,26 +102,32 @@ impractical during implementation.
 
 ## 5. RBAC: what does `provider-helm`'s `InjectedIdentity` credential need?
 
-**Decision**: An aggregated `ClusterRole` (label
-`rbac.crossplane.io/aggregate-to-crossplane: "true"`, the same mechanism
-`provider-kubernetes`'s existing RBAC already uses in this repo) granting the
-permissions the vcluster chart's rendered resources require (at minimum:
-`apps` Deployments/StatefulSets, `core` Services/Secrets/ConfigMaps/
-ServiceAccounts/PersistentVolumeClaims, `rbac.authorization.k8s.io` Roles/
-RoleBindings, `networking.k8s.io` if the chart creates any). Exact resource list to
-be finalized empirically against the actual chart version pinned in
-`compositions/dataplane-cluster/chart/values.yaml` — broad enough to avoid repeated
-trial-and-error, scoped to what a namespaced Helm release plausibly needs (not
-cluster-admin).
+**Decision** (revised after checking `provider-helm`'s own official in-cluster
+example, `examples/cluster/provider-config/provider-incluster.yaml` at v1.4.0):
+grant effectively `cluster-admin`-level permissions, delivered via an aggregated
+`ClusterRole` (label `rbac.crossplane.io/aggregate-to-crossplane: "true"`, the same
+mechanism `provider-kubernetes`'s existing RBAC already uses in this repo) with
+wildcard rules (`apiGroups: ["*"], resources: ["*"], verbs: ["*"]`), instead of the
+upstream example's more manual `DeploymentRuntimeConfig` + fixed ServiceAccount name
++ explicit `ClusterRoleBinding` to `cluster-admin`.
 
-**Rationale**: Matches this repo's existing pattern exactly (see
-`crossplane/providers/provider-kubernetes.yaml`'s `provider-kubernetes-secrets`
-aggregated `ClusterRole`) — no new RBAC delivery mechanism needed, just a new
-aggregated role with a wider rule set appropriate to what `provider-helm` does.
+**Rationale**: The upstream example itself grants `cluster-admin` for exactly this
+scenario, because a `Release`'s chart is arbitrary and unknown ahead of time — Helm
+can install almost any resource type/RBAC object, so scoping precisely the way
+`provider-kubernetes-secrets` does for a single resource type (`secrets`) isn't
+practical here. This repo already proves Crossplane's rbac-manager auto-aggregates
+labeled `ClusterRole`s into a provider revision's real ServiceAccount (that's how
+`provider-kubernetes` gets its secret-read access without anyone hardcoding its
+generated SA name) — reusing that same mechanism for `provider-helm`, just with a
+wider rule set, avoids introducing a second, different RBAC-wiring mechanism
+(`DeploymentRuntimeConfig`) into this repo for a permission level upstream itself
+already treats as equivalent to `cluster-admin`.
 
-**Alternatives considered**: Binding `cluster-admin` directly — rejected as broader
-than necessary and inconsistent with this project's existing least-privilege
-aggregated-ClusterRole pattern.
+**Alternatives considered**: Following the upstream example exactly
+(`DeploymentRuntimeConfig` fixing the ServiceAccount name to `provider-helm`, then a
+named `ClusterRoleBinding` to the built-in `cluster-admin` `ClusterRole`) — works
+identically in practice; rejected only to keep this repo's RBAC-wiring pattern
+single and consistent across providers, not because it's wrong.
 
 ## 6. What does the `XDataPlane` Composition's claim schema need?
 

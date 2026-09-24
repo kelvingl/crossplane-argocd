@@ -1,0 +1,26 @@
+apiVersion: pkg.crossplane.io/v1
+kind: Provider
+metadata:
+  name: provider-helm
+spec:
+  package: xpkg.crossplane.io/crossplane-contrib/provider-helm:v1.4.0
+---
+# provider-helm installs arbitrary Helm charts (for this repo: the vcluster
+# chart, via the XDataPlane Composition) — the chart's contents aren't known
+# ahead of time, so unlike provider-kubernetes-secrets (scoped to just
+# "secrets"), this aggregated ClusterRole grants everything, matching what
+# provider-helm's own official in-cluster example
+# (examples/cluster/provider-config/provider-incluster.yaml) grants via an
+# explicit ClusterRoleBinding to the built-in cluster-admin role — same
+# effective permission, delivered through the aggregation mechanism this repo
+# already relies on for provider-kubernetes instead of a second RBAC pattern.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: provider-helm-admin
+  labels:
+    rbac.crossplane.io/aggregate-to-crossplane: "true"
+rules:
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs: ["*"]
