@@ -114,10 +114,8 @@ charts:                    # Helm charts aplicados DIRETO no cluster do spoke
   - name: hello
     chart: charts/hello     # caminho, no repo dataplanes, até o chart
     values: { replicas: 1 }
-compositions:               # claims de Composition, aplicadas no HUB
-  - name: adv-01
-    composition: dataplane-advanced   # ver compositions/<nome>/README.md
-    values: { image: nginxdemos/hello, replicas: 1, config: { greeting: hello-from-adv-01 } }
+compositions: []            # claims de Composition, aplicadas no HUB — nenhuma
+                             # composition com instance-chart disponível no momento
 ```
 
 O `ApplicationSet` `dataplanes` (`gitops/apps/dataplanes-appset.yaml`, no
@@ -133,6 +131,45 @@ completo e ADR-029 em `decisions.md` para os erros reais de templating
 encontrados na migração (YAML quebrado por `{{ }}` não citado; parâmetro
 errado do gerador `files` para o nome do arquivo).
 
+## `addons/<nome>/`: instalado em todo spoke, automaticamente
+
+Diferente de `dataplanes/<spoke>.yaml` (um arquivo por spoke, editado
+manualmente), os addons são instalados em **todo** spoke registrado no
+ArgoCD sem nenhuma edição por spoke. O `ApplicationSet`
+`dataplane-addons` (`gitops/apps/dataplane-addons-appset.yaml`) usa um
+gerador `matrix` combinando:
+
+1. o gerador `clusters`, filtrado por `selector.matchLabels:
+   lab.example.org/role: dataplane` — sem esse filtro, o gerador `clusters`
+   também incluiria o `in-cluster` implícito (o próprio hub), onde nenhum
+   addon de spoke faz sentido. O label é aplicado por
+   `scripts/16-register-argocd-clusters.sh` no Secret de cada Cluster.
+2. um gerador `git` `directories` sobre `addons/*` (chart Helm por pasta).
+
+O produto cartesiano dos dois gera uma `Application`
+(`dataplane-addons-<spoke>-<addon>`) por combinação (spoke × addon), cada
+uma com `destination.name: <spoke>` — direto no cluster, sem Crossplane,
+mesmo mecanismo das entradas `charts:`. `spoke` é injetado automaticamente
+via `valuesObject`. Dois addons de exemplo hoje (`addons/README.md` tem o
+detalhe de cada um):
+
+- **`prometheus`**: servidor Prometheus + UI, exposta via `Ingress` em
+  `prometheus.<spoke>.127-0-0-1.nip.io`.
+- **`external-dns`**: observa `Ingress` dentro do spoke
+  (`domain-filter: <spoke>.127-0-0-1.nip.io`), provider `inmemory` (o
+  provedor de testes/demo do próprio projeto — nip.io já resolve qualquer
+  subdomínio sozinho, não há um backend de DNS real para gerenciar aqui).
+
+Ambos só ficam alcançáveis de fora do cluster porque
+`compositions/dataplane-cluster` liga `sync.toHost.ingresses: true` nos
+values do chart do vcluster — um `Ingress` criado **dentro** do spoke é
+espelhado para o hub (nome sincronizado, ex.:
+`prometheus-x-prometheus-x-spoke-01`), onde o Traefik e o cert-manager reais
+(nenhum dos dois roda dentro de um spoke) o enxergam e agem sobre ele.
+Confirmado com um teste manual antes de qualquer addon existir: um
+`Deployment`+`Service`+`Ingress` de teste dentro de `spoke-01`, HTTP 200,
+depois HTTPS 200 com certificado emitido pela `lab-ca-issuer`.
+
 ## Diagrama de componentes
 
 ```mermaid
@@ -146,23 +183,21 @@ flowchart TB
         MiniStack["MiniStack\n(emulador AWS local)"]
 
         subgraph spoke01["spoke-01 (vcluster)"]
-            NS1["dp-adv-01/\nDeployment+Service+ConfigMap"]
+            NS1["hello chart\n+ addons: prometheus, external-dns"]
         end
         subgraph spoke02["spoke-02 (vcluster)"]
-            NS2["dp-adv-03/\nDeployment+Service+ConfigMap"]
+            NS2["addons: prometheus, external-dns"]
         end
 
         ArgoCD -->|reconcilia a partir de| Gogs
         ArgoCD -->|instala/atualiza| CP
         ArgoCD -->|instala| Registry
         ArgoCD -->|instala| MiniStack
-        CP -->|pull da imagem da Function| Registry
         CP -->|provider-aws-s3 → Bucket| MiniStack
         CP -->|provider-helm → Release| spoke01
         CP -->|provider-helm → Release| spoke02
-        CP -->|provider-kubernetes\nProviderConfig spoke-01| NS1
-        CP -->|provider-kubernetes\nProviderConfig spoke-02| NS2
-        ArgoCD -->|destination.name: spoke-01\n(chart direto)| spoke01
+        ArgoCD -->|destination.name\n(chart/addon direto)| spoke01
+        ArgoCD -->|destination.name\n(addon direto)| spoke02
     end
 
     Origin[("GitHub origin\n(backup/colaboração humana)")]
@@ -198,11 +233,11 @@ Filhas atuais, por `sync-wave` (menor primeiro):
 | `"0"` | `ministack` | `ministack/` (directory) | `ministack` |
 | `"1"` | `crossplane-providers` | `crossplane/providers` (directory) | `crossplane-system` |
 | `"1"` | `crossplane-compositions` | `compositions/dataplane-cluster/chart` (helm) | `crossplane-system` |
-| `"1"` | `crossplane-compositions-advanced` | `compositions/dataplane-advanced/chart` (helm) | `crossplane-system` |
 | `"1"` | `crossplane-compositions-s3` | `compositions/s3-bucket/chart` (helm) | `crossplane-system` |
 | `"2"` | `crossplane-config` | `crossplane/config` (directory) | `crossplane-system` |
 | `"2"` | `argocd-networking` | `gitops/argocd` (directory) | `argocd` |
 | `"2"` | `dataplanes` (ApplicationSet) | git generator `files` (`dataplanes/*.yaml`) sobre o repo `dataplanes` | `argocd` (wrapper); filhas variam — spoke ou hub |
+| `"2"` | `dataplane-addons` (ApplicationSet) | `matrix`: gerador `clusters` × git `directories` (`addons/*`) | direto no spoke (por addon) |
 
 **Por que essa ordem:** Crossplane core precisa existir antes de qualquer
 `Provider`/`ProviderConfig`/`Composition` que o referencie (wave 0 → 1); o
@@ -228,16 +263,19 @@ cujo nome bate com `spec.parameters.spoke`; (b) via `provider-helm`, um
 `dataplane-cluster` para trazer o spoke em si à existência. O Crossplane nunca
 fala diretamente com a API de um spoke fora do `provider-kubernetes`.
 
-Três Compositions existem hoje (ver `docs/compositions.md` para detalhes de cada
+Duas Compositions existem hoje (ver `docs/compositions.md` para detalhes de cada
 uma):
 1. `dataplane-cluster` — Patch-and-Transform clássico, cria o próprio spoke
    (um vcluster, via `provider-helm`) — não produz recursos *dentro* de um
    spoke, produz o spoke.
-2. `dataplane-advanced` — Composition Function em Go (`spec.mode: Pipeline`),
-   produz um conjunto mais rico de recursos **dentro** de um spoke.
-3. `s3-bucket` — Patch-and-Transform, provisiona um Bucket `provider-aws-s3` no
+2. `s3-bucket` — Patch-and-Transform, provisiona um Bucket `provider-aws-s3` no
    MiniStack (não num spoke — é o único caso onde o alvo não é um cluster
    spoke, e sim o emulador AWS rodando no hub).
+
+Uma terceira Composition, `dataplane-advanced` (Composition Function em Go,
+`spec.mode: Pipeline`, produzia um conjunto mais rico de recursos **dentro**
+de um spoke), existiu e foi removida por completo — ver ADR correspondente em
+`docs/decisions.md`.
 
 ## Gogs como única fonte GitOps
 
@@ -258,13 +296,12 @@ Há dois repositórios Gogs relevantes:
   (documentação do contrato de values de cada Composition instalada no hub).
   É consumido pelo `ApplicationSet` via git generator `files`.
 
-O código-fonte da Composition Function (Go) **não** vive em um terceiro
-repositório dedicado — a ideia original (feature 002, ver `research.md`) era
-um repo `dataplane-function` separado, mas isso foi revertido durante a
-implementação (ver `docs/decisions.md`) e o código ficou em
-`compositions/dataplane-advanced/function/` dentro deste mesmo repositório.
-
 ## Registry OCI privado
+
+> **Sem consumidor no momento**: este registry foi construído especificamente
+> para hospedar a imagem da Composition Function `dataplane-advanced`, que foi
+> removida do repositório. Continua rodando (nenhuma limpeza foi pedida), mas
+> nada mais neste lab publica ou consome imagens dele hoje.
 
 `registry/` sobe um `registry:2` (CNCF distribution/distribution) como
 Deployment+PVC+Service+Ingress no hub, dedicado a publicar a imagem xpkg da
