@@ -13,14 +13,21 @@
 # credenciais em qualquer lugar do fluxo declarativo), mas o repo-server do
 # ArgoCD roda `helm template` sem acesso ao cluster — `lookup` sempre
 # retorna vazio ali, mesmo com o Secret existindo (testado, não suposto).
-# Então a criação do Secret de credenciais continua imperativa aqui, como o
-# Secret de kubeconfig do provider-kubernetes (Constitution Principle V —
-# Secrets Never Committed); só a *lista* de quais spokes registrar passou a
-# vir do Git.
+# Então a criação do Secret de credenciais continua imperativa aqui; só a
+# *lista* de quais spokes registrar vem do Git.
+#
+# Feature 003 (vcluster): cada spoke agora é um vcluster dentro do hub, não
+# mais um cluster k3d separado. O kubeconfig vem do Secret que o próprio
+# chart do vcluster gera em tempo de execução (namespace = nome do spoke,
+# Secret "vc-<spoke>"), com chaves já separadas
+# (certificate-authority/client-certificate/client-key) — não precisa mais
+# fazer parsing de kubeconfig via `kubectl config view` como no modelo k3d
+# antigo (scripts/03-register-spokes.sh, agora removido). O server é
+# previsível: "https://<spoke>.<spoke>:443" (a forma curta "nome.namespace"
+# — o certificado do vcluster só cobre essa forma, não o FQDN completo
+# "...svc.cluster.local"; ver specs/003-vcluster-dataplanes/research.md #2).
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SECRETS_DIR="$ROOT_DIR/.secrets"
 GOGS_ADMIN_USER="gitadmin"
 GOGS_ADMIN_PASSWORD="ChangeMe123!"
 LOCAL_PORT="48765"
@@ -55,19 +62,20 @@ git clone --depth 1 --quiet --branch main \
 
 register_cluster() {
   local spoke="$1"
-  local kubeconfig="$SECRETS_DIR/${spoke}.kubeconfig"
+  local secret_name="vc-${spoke}"
 
-  if [ ! -f "$kubeconfig" ]; then
-    echo "!! $kubeconfig não existe — rode scripts/03-register-spokes.sh primeiro" >&2
+  if ! kubectl --context k3d-hub -n "$spoke" get secret "$secret_name" >/dev/null 2>&1; then
+    echo "!! secret ${spoke}/${secret_name} não existe — o vcluster ainda não subiu? (aguarde o DataPlane claim '${spoke}' ficar Ready)" >&2
     exit 1
   fi
 
-  local server cert_data key_data config_json
-  server="$(kubectl config view --kubeconfig="$kubeconfig" --raw -o jsonpath='{.clusters[0].cluster.server}')"
-  cert_data="$(kubectl config view --kubeconfig="$kubeconfig" --raw -o jsonpath='{.users[0].user.client-certificate-data}')"
-  key_data="$(kubectl config view --kubeconfig="$kubeconfig" --raw -o jsonpath='{.users[0].user.client-key-data}')"
+  local server ca_data cert_data key_data config_json
+  server="https://${spoke}.${spoke}:443"
+  ca_data="$(kubectl --context k3d-hub -n "$spoke" get secret "$secret_name" -o jsonpath='{.data.certificate-authority}')"
+  cert_data="$(kubectl --context k3d-hub -n "$spoke" get secret "$secret_name" -o jsonpath='{.data.client-certificate}')"
+  key_data="$(kubectl --context k3d-hub -n "$spoke" get secret "$secret_name" -o jsonpath='{.data.client-key}')"
 
-  config_json="{\"tlsClientConfig\":{\"insecure\":true,\"certData\":\"${cert_data}\",\"keyData\":\"${key_data}\"}}"
+  config_json="{\"tlsClientConfig\":{\"caData\":\"${ca_data}\",\"certData\":\"${cert_data}\",\"keyData\":\"${key_data}\"}}"
 
   echo "==> registrando cluster '${spoke}' no ArgoCD (server ${server})"
   kubectl --context k3d-hub -n argocd create secret generic "cluster-${spoke}" \

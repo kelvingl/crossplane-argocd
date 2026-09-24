@@ -1,7 +1,7 @@
-# O Secret "spoke-02-kubeconfig" é criado fora do Git por
-# scripts/03-register-spokes.sh (contém o kubeconfig do cluster spoke-02,
-# com o server reescrito para o nome do container na rede docker
-# compartilhada, ex: https://k3d-spoke-02-server-0:6443).
+# O Secret "vc-spoke-02" é gerado em tempo de execução pelo próprio chart
+# do vcluster (compositions/dataplane-cluster), no namespace "spoke-02" —
+# não mais criado por script (feature 003 substitui o cluster k3d real
+# spoke-02 por esse vcluster; ver specs/003-vcluster-dataplanes/).
 apiVersion: kubernetes.crossplane.io/v1alpha1
 kind: ProviderConfig
 metadata:
@@ -12,6 +12,6 @@ spec:
   credentials:
     source: Secret
     secretRef:
-      namespace: crossplane-system
-      name: spoke-02-kubeconfig
-      key: kubeconfig
+      namespace: spoke-02
+      name: vc-spoke-02
+      key: config
