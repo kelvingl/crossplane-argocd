@@ -1,22 +1,50 @@
 <!--
 Sync Impact Report
-- Version change: 1.0.0 → 1.1.0
-- Modified principles: none redefined/removed (I-V unchanged)
-- Modified sections: Technology Constraints — Crossplane bullet expanded to
-  additionally permit Composition Functions (function-pipeline mode) for new,
-  advanced example Compositions, alongside the existing classic v1.x
-  Patch-and-Transform model (both now coexist; v2/namespaced-XR migration is
-  still a separate future amendment). Two new bullets added: private-registry
-  requirement for Composition Function images, and mandatory Helm packaging for
-  any Composition ArgoCD installs/upgrades.
-- Added sections: none (amendment lives inside existing Technology Constraints)
-- Removed sections: none
+- Version change: 1.1.0 → 1.2.0
+- Modified principles:
+  - II. Hub-and-Spoke Isolation — redefined how a spoke's compute comes to exist
+    (vcluster running inside the hub, provisioned via the `XDataPlane` Composition/
+    `DataPlane` claim, instead of a manually-created standalone k3d cluster); the
+    isolation guarantee itself (no platform tooling on a spoke, resources only via
+    `provider-kubernetes`, registration via `ProviderConfig` + out-of-band Secret)
+    is unchanged in substance, so this is treated as expanded guidance, not a
+    redefinition of the non-negotiable core — hence a MINOR bump, not MAJOR. Also
+    now explicitly names ArgoCD Cluster registration as part of "how a spoke is
+    registered" (documents an existing mechanism, not a new decision).
+- Modified sections: Technology Constraints —
+  - First bullet replaced: local clusters are no longer "k3d hub + k3d spoke-01 +
+    k3d spoke-02 sharing a Docker network"; only the `hub` remains a real,
+    standalone k3d cluster, and every dataplane/spoke is a vcluster
+    (loft-sh/vcluster) running as a workload inside it, provisioned exclusively
+    through the `XDataPlane` Composition/`DataPlane` claim. `scripts/02-create-
+    clusters.sh` creating additional standalone k3d clusters for new spokes is
+    retired.
+  - Second bullet's worked example corrected: `xdataplanes.lab.example.org` from
+    feature 001-dataplane-provisioning is called out explicitly as retired and
+    redefined by feature 003-vcluster-dataplanes (same XRD/claim names, different
+    meaning — "the spoke cluster itself" instead of "a workload inside an existing
+    spoke") — the previous text cited it as a still-valid classic-Composition
+    example, which is no longer true; the example was swapped to `s3-bucket`.
+  - New bullet added sanctioning `crossplane-contrib/provider-helm`, scoped
+    specifically to installing the vcluster project's own Helm chart from within
+    the `XDataPlane` Composition — chosen over reimplementing vcluster's manifests
+    through `provider-kubernetes` to avoid duplicating logic the upstream chart
+    already maintains.
+  - `provider-kubernetes` bullet clarified to scope its "only mechanism" claim to
+    *reaching an already-provisioned* spoke, distinct from the new
+    `provider-helm`-based mechanism for provisioning a spoke's underlying vcluster
+    in the first place.
+- Added sections: none (amendment lives inside existing Principle II and
+  Technology Constraints).
+- Removed sections: none.
 - Templates requiring follow-up: none — plan/spec/tasks templates already
   reference "Constitution Check" generically.
 - Deferred placeholders: none.
-- Rationale for MINOR bump: materially expands Technology Constraints guidance
-  (new permitted pattern + two new mandatory constraints) without removing or
-  redefining any existing non-negotiable principle (I-V untouched).
+- Rationale for MINOR bump: extends/updates guidance (new permitted provisioning
+  mechanism for a spoke's compute, one new sanctioned provider, one corrected
+  worked example) without removing or redefining the non-negotiable substance of
+  any Core Principle (I, III, IV, V untouched; II's isolation guarantee holds,
+  only the "how a spoke's compute is created" detail changes).
 -->
 
 # argo-crossplane Constitution
@@ -36,13 +64,20 @@ the reason this lab exists.
 
 ### II. Hub-and-Spoke Isolation
 The `hub` cluster is the only cluster that runs ArgoCD, Gogs, or the Crossplane
-control plane. Spoke clusters (`spoke-01`, `spoke-02`, and any added later) MUST NOT
-run platform tooling of their own — they only ever receive resources pushed from the
-hub via `provider-kubernetes` `Object` resources. A spoke is registered by creating a
+control plane. Dataplane/spoke clusters MUST NOT run platform tooling of their own —
+they only ever receive resources pushed from the hub via `provider-kubernetes`
+`Object` resources. A spoke's compute MUST be provisioned as a vcluster running as a
+workload inside the `hub` cluster (see Technology Constraints), created and destroyed
+exclusively by submitting or removing a `DataPlane` claim (the `XDataPlane`
+Composition) — never by manually creating a standalone cluster — with the sole
+exception of the `hub` cluster itself, which remains the one real,
+imperatively-created k3d cluster. A spoke is registered by creating a
 `ProviderConfig` in `crossplane/config/` whose name matches the spoke, backed by a
-kubeconfig `Secret` created out-of-band (never committed). Compositions MUST select
-the target spoke only through `spec.parameters.spoke` → `providerConfigRef.name`;
-they MUST NOT hardcode cluster endpoints or credentials inline.
+kubeconfig `Secret` created out-of-band (never committed), and by registering it as a
+Cluster in ArgoCD (credentials likewise sourced out-of-band, never committed) so
+ArgoCD Applications can address it by name. Compositions MUST select the target
+spoke only through `spec.parameters.spoke` → `providerConfigRef.name`; they MUST NOT
+hardcode cluster endpoints or credentials inline.
 
 ### III. App-of-Apps Structure
 Every platform component is a distinct child `Application` under `gitops/apps/`,
@@ -74,19 +109,27 @@ private key, or kubeconfig.
 
 ## Technology Constraints
 
-- Local clusters are provisioned with k3d; `hub`, `spoke-01`, and `spoke-02` (and any
-  future spoke) MUST share one Docker network (`hublab`) so the hub can reach spoke
-  API servers by container DNS name, and each spoke MUST be created with a
-  `--tls-san` matching its own server container name.
+- The `hub` cluster is provisioned with k3d and is the only real, standalone
+  Kubernetes cluster this lab depends on. Every dataplane/spoke MUST instead be a
+  vcluster (the loft-sh/vcluster project) running as a workload inside the `hub`
+  cluster, provisioned exclusively through the `XDataPlane` Composition (claim
+  `DataPlane`) — never as a separate k3d cluster. `scripts/02-create-clusters.sh`
+  creating additional standalone k3d clusters for new spokes is retired; any new
+  dataplane/spoke MUST come from a `DataPlane` claim, not a new k3d cluster.
 - Crossplane's classic v1.x cluster-scoped Composition (Patch-and-Transform via
   `spec.resources`) remains valid and MUST keep working for every Composition that
-  predates this amendment (e.g. `xdataplanes.lab.example.org` from feature
-  001-dataplane-provisioning). Crossplane Composition Functions (v1.x
+  predates this amendment and is still in use (e.g. `s3-bucket` from feature
+  002-golang-composition-pipeline). Crossplane Composition Functions (v1.x
   function-pipeline mode, `spec.mode: Pipeline`) are additionally permitted for new,
   more advanced example Compositions (e.g. feature 002-golang-composition-pipeline),
   provided they still select the target spoke exclusively through
   `providerConfigRef.name` per Principle II. Adopting Crossplane v2 (namespaced XRs)
   remains a deliberate, separate future amendment, not authorized by this change.
+  Note: the XRD/claim pair `XDataPlane`/`DataPlane` originally introduced by feature
+  001-dataplane-provisioning (meaning "a workload inside an already-existing spoke")
+  is retired and its name reused, with a different meaning ("the spoke cluster
+  itself"), by feature 003-vcluster-dataplanes — it is not an example of a
+  still-valid, unchanged pre-existing Composition.
 - Any Composition Function's container image MUST be published to, and pulled from,
   a private OCI registry that itself runs in the hub and is provisioned through this
   repository's GitOps automation (Principle I) — a Composition Function MUST NOT
@@ -98,9 +141,14 @@ private key, or kubeconfig.
   amendment is in effect; a Composition Application predating this amendment MUST be
   migrated to a Helm-based Application before or as part of the change that touches
   it next.
-- `provider-kubernetes` is the only mechanism used to reach spokes from the hub.
-  Introducing a different multi-cluster mechanism (e.g. Cluster API, a commercial
-  Crossplane multi-cluster feature) requires amending this constitution first.
+- `provider-kubernetes` is the only mechanism used to reach an already-provisioned
+  spoke from the hub (applying workload resources into it). Provisioning a spoke's
+  underlying vcluster in the first place is the one sanctioned exception: the
+  `XDataPlane` Composition MUST use `crossplane-contrib/provider-helm` to install the
+  vcluster project's own Helm chart, rather than reimplementing its manifests through
+  `provider-kubernetes`. Introducing any other multi-cluster or cluster-provisioning
+  mechanism (e.g. Cluster API, a commercial Crossplane multi-cluster feature)
+  requires amending this constitution first.
 - Gogs (not GitHub or another SaaS) is the git source ArgoCD reconciles from inside
   the cluster, so the lab keeps working without external network access once
   bootstrapped. A GitHub remote (`origin`) MAY additionally exist for human
@@ -135,4 +183,4 @@ SHOULD be run before `/speckit-implement` on any feature to confirm the plan and
 tasks stay compliant with the principles above; deviations must be justified in the
 feature's plan, not silently merged.
 
-**Version**: 1.1.0 | **Ratified**: 2026-09-18 | **Last Amended**: 2026-09-19
+**Version**: 1.2.0 | **Ratified**: 2026-09-18 | **Last Amended**: 2026-09-24
